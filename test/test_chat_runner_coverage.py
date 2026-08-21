@@ -33,6 +33,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from chat_test_helpers import _make_ready_kiro_prerequisite
 
+from kiro_crew import name_grant
 from kiro_crew.acp.types import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
@@ -2375,6 +2376,73 @@ class TestRunChatRecoveryLadders:
 
 
 class TestRunChatAutoApproveRungs:
+    @pytest.fixture(autouse=True)
+    def _vouch_for_the_program(self):
+        """Let these tests exercise the RUNG, not the host's program layout.
+
+        Each rung now re-judges its own auto-approve by asking whether the
+        command's program names still identify the programs they name
+        (``name_grant``), which resolves against the real ``PATH`` and reads the
+        file behind each name. That made these tests depend on the machine: they
+        use ``ls -la``, which passes on Linux because ``ls`` lives in a trusted
+        system directory and FAILS on Windows, where there is no such ``ls`` --
+        so the rung declined, `approve_tool` was never called, and the assertions
+        below broke on one platform only. The thread hop the real check needs also
+        outlives these tests' event loop and crashed the xdist worker.
+
+        Stubbing it keeps each test measuring what its name claims -- does the
+        rung approve, reject, and render -- while the check itself is covered
+        directly in ``test/test_name_grant.py``. It patches the ONE off-loop
+        entry point every rung goes through; patching only the event-shaped
+        wrapper left two rungs spawning real threads, which is why the Windows
+        workers kept crashing after the first attempt at this.
+        """
+
+        with patch.object(
+            chat_runner, "_name_grant_refusal_off_loop", new=AsyncMock(return_value=None)
+        ):
+            yield
+
+    @pytest.mark.asyncio
+    async def test_a_declined_name_grant_is_audited(self, tmp_path):
+        """GPT 5.6 round-19: declining a grant is a security decision, so it is logged.
+
+        Without this the audit trail shows a command arriving at the interactive
+        card and never says a name grant was withheld, or why.
+        """
+        state, client = _runner_state(tmp_path)
+        slot = _slot()
+        slot._trust_reads = True
+        _set_stream(
+            client,
+            [_permission(title="Running: ls -la", tool_input='{"command": "ls -la"}'), _complete()],
+        )
+        refusal = name_grant.Refusal(name_grant.SHADOWED, "ls resolves to /writable/ls")
+        slot._empty_response_retries = 2
+        with (
+            patch.object(chat_runner, "sel") as mock_sel,
+            patch.object(
+                chat_runner, "_name_grant_refusal_off_loop", new=AsyncMock(return_value=refusal)
+            ),
+            patch.object(chat_runner, "tool_approval_timeout_secs", return_value=0.0),
+        ):
+            audit = MagicMock()
+            mock_sel.return_value = audit
+            await chat_runner._run_chat(state, slot, "hello")
+        await _settle(slot)
+
+        declined = [
+            c.kwargs
+            for c in audit.log_tool_invocation.call_args_list
+            if c.kwargs.get("outcome") == "auto_approve_declined"
+        ]
+        assert declined, audit.log_tool_invocation.call_args_list
+        assert declined[0]["metadata"]["code"] == name_grant.SHADOWED
+        assert declined[0]["metadata"]["tier"] == "trust_reads"
+        # The CODE, never the detail: the detail names resolved paths, and an
+        # audit sink is exactly where that becomes a disclosure.
+        assert "/writable/ls" not in json.dumps(declined[0], default=str)
+
     @pytest.mark.asyncio
     async def test_non_shell_trust_matches_cached_server_tool_identity(self, tmp_path):
         state, client = _runner_state(tmp_path)
