@@ -195,6 +195,105 @@ def _installed_agent_config() -> Path:
     return kiro_agents_dir_path() / AGENT_FILENAME
 
 
+def _write_installed_config_locked(path: Path, config: dict[str, Any]) -> None:
+    """Write the installed agent spec while holding bridges' file lock.
+
+    Runs in a worker thread (see :func:`_commit_agent_config`, dispatched
+    through ``_offload_config_write``), which is what makes taking a synchronous
+    flock here legal — on the event loop it would stall the gateway whenever app
+    registration held the lock.
+
+    ``bridges._mcp_lock`` is imported lazily: ``apps.bridges`` imports back into
+    the dashboard handlers, so a module-level import is circular.
+    """
+    from kiro_crew.apps.bridges import _mcp_lock as _agent_file_lock
+
+    with _agent_file_lock(target=path):
+        write_config_atomically(path, config)
+
+
+def _commit_agent_config(
+    *,
+    config: dict[str, Any],
+    name: str,
+    mc_cfg_path: Path,
+    removed_per_key: dict[str, list[str]],
+    installed_path: Path,
+) -> bool:
+    """Perform the one fallible read and EVERY durable write of one PUT, as one unit.
+
+    This function is the commit half of the invariant stated at the
+    :func:`api_agent_config` PUT branch: it is the ONLY place that branch
+    persists application state, it is purely synchronous, and it is dispatched
+    exactly once through the shielded ``_offload_config_write``. Those three
+    properties make a PUT **non-cancellable but not rollback-atomic**:
+
+    * Purely synchronous — there is no await between two writes, so no
+      cancellation and no other task can be interleaved into the sequence. A
+      worker thread cannot be cancelled at all, so once this starts it runs to
+      completion.
+    * Dispatched once, shielded — the caller cannot unwind (and so cannot
+      release the transaction lock) until this has returned. The alternative
+      shape, awaiting each write separately under the lock, puts a cancellation
+      point between writes however wide the lock is.
+    * The only writer — nothing durable happens before the call, so every
+      failure earlier in the handler leaves the three targets byte-identical.
+
+    What that does NOT buy is rollback: an I/O failure (permission, quota, disk
+    full, lock-open, a failed atomic rename) stops the sequence where it is, and
+    the writes already committed stay committed. The honest failure prefixes, in
+    order, are:
+
+    1. the ``config.json`` read raises :class:`ConfigReadError` — nothing
+       durable, and the caller's 500 is exact;
+    2. the ``config.json`` write fails — nothing durable;
+    3. the first bookkeeping write fails — ``config.json`` updated;
+    4. the second bookkeeping write fails (the lift can write twice, once per
+       key) — ``config.json`` updated plus one bookkeeping key;
+    5. the installed-spec write fails — ``config.json`` and bookkeeping
+       updated, the spec unchanged.
+
+    Order inside the unit is chosen to make the *earliest* prefixes the *least*
+    harmful, and two steps are load-bearing rather than incidental:
+
+    * The read is FIRST. It is the only fallible-by-decision step, and running
+      it here — immediately adjacent to the write it feeds — is what closes the
+      lost-update window: on the previous shape the caller read the baseline and
+      the worker wrote it back one executor hop later, so a concurrent writer
+      landing in that gap had its unrelated fields silently reverted.
+    * The bookkeeping lift runs AFTER the ``config.json`` write (so prefix 2
+      leaves the sidecar untouched, restoring the pre-lock ordering) but BEFORE
+      the spec write, because it STRIPS Kiro Crew keys (``model_managed`` /
+      ``cc_model``) out of the same *config* dict the spec write then persists —
+      reverse the two and the spec lands with fields kiro-cli's
+      ``deny_unknown_fields`` rejects (#2570).
+
+    Everything else fallible has already been decided by the caller: *config* is
+    parsed, governed and validated, *removed_per_key* is the computed
+    ``removedTools`` map, and both paths are resolved.
+
+    Returns whatever the bookkeeping lift returns (True when it stripped a
+    key), so the caller can log it after the lock is released — logging is not
+    durable state and has no business inside the unit.
+    """
+    # (1) The one fallible step, and it precedes every write.
+    #
+    # Fail closed: writing back a {} baseline would drop every other setting
+    # just to record removedTools (see read_config_for_update).
+    mc_cfg = read_config_for_update(mc_cfg_path)
+    if removed_per_key:
+        mc_cfg["removedTools"] = removed_per_key
+    else:
+        mc_cfg.pop("removedTools", None)
+    # (2) config.json — the snapshot the read above produced, still current.
+    write_config_atomically(mc_cfg_path, mc_cfg)
+    # (3) agent_model_state.json bookkeeping — after (2), before (4).
+    changed = agent_state.lift_and_strip_bookkeeping(config, name)
+    # (4) the installed spec, under bridges' file lock.
+    _write_installed_config_locked(installed_path, config)
+    return changed
+
+
 async def api_agent_config(request: web.Request) -> web.Response:
     """GET/PUT /api/agent/config — read or write the installed agent config.
 
@@ -221,10 +320,102 @@ async def api_agent_config(request: web.Request) -> web.Response:
         if not isinstance(config, dict):
             return web.json_response({"error": "config must be an object"}, status=400)
         try:
+            # ── THE INVARIANT THIS BRANCH ENFORCES ────────────────────────────
+            # Every validation completes BEFORE the first durable write, and the
+            # one fallible read plus all durable APPLICATION/CONFIG writes of one
+            # PUT execute as a single non-cancellable unit that the transaction
+            # lock strictly contains — the lock cannot release while any write of
+            # the unit is in flight.
+            #
+            # "Application/config writes" is the exact scope, and deliberately so:
+            # the transaction lock's own sidecar (``_McpFileLock.__aenter__``
+            # creates ~/.kiro/settings/mcp.lock) and the SEL audit record on the
+            # owner-denial path above are INFRASTRUCTURE, not payload. Both can
+            # become durable outside the unit, and neither is a half-applied PUT:
+            # a lock file records no user setting and the audit log is required to
+            # outlive the request it describes.
+            #
+            # The unit is non-cancellable but NOT rollback-atomic: an I/O failure
+            # part-way through leaves the earlier writes committed. The prefixes
+            # are enumerated in :func:`_commit_agent_config`, which also explains
+            # why the order makes the earliest prefix the least harmful.
+            #
+            # Structurally that is two phases with nothing in between:
+            #
+            #   PHASE 1 (below, off the locks) — GATHER AND DECIDE. Parse, diff,
+            #   govern, resolve every path. Persists nothing, so any failure or
+            #   cancellation here leaves all three target files byte-identical
+            #   and the 4xx/5xx it returns is honest.
+            #
+            #   PHASE 2 — COMMIT. Take the transaction lock, then the config
+            #   lock, then hand the ``config.json`` READ and ALL THREE durable
+            #   writes to :func:`_commit_agent_config` through the shielded
+            #   ``_offload_config_write``, exactly once. The read is inside the
+            #   unit rather than in front of it: adjacent to the write it feeds,
+            #   it cannot capture a baseline that a concurrent writer then
+            #   updates before the worker publishes it back.
+            #
+            # Why this shape and not "the lock covers more": three prior fixes
+            # widened the lock and each time the next defect was a SEQUENCING or
+            # CANCELLATION fault inside the widened span — a fallible read placed
+            # after a write, an await between two writes, a worker outliving the
+            # await that dispatched it. Widening a span cannot fix those, because
+            # they are properties of what happens INSIDE it. Collapsing the writes
+            # to a single synchronous unit removes the interleaving points instead
+            # of trying to cover them: there is no "between two writes" to land in.
+            #
+            # The three lock layers, transaction lock outermost:
+            #
+            # 1. ``_get_mcp_lock`` (~/.kiro/settings/mcp.lock) is the MCP
+            #    TRANSACTION lock. Agent spec files are a census source for the
+            #    MCP config transactions in handlers/mcp.py, which read the
+            #    current state and then act on it while holding this lock. An
+            #    unlocked write can land inside that read-then-act window, so the
+            #    transaction commits a decision about spec contents that changed
+            #    underneath it.
+            # 2. ``_get_config_lock`` is the in-process lock every other
+            #    ``config.json`` read-modify-writer in the dashboard takes
+            #    (messaging channel savers, security, the MCP handlers, agent
+            #    create/update/delete). This PUT's own RMW now spans an executor
+            #    hop, so the event loop no longer serializes it for free: without
+            #    this lock a sibling RMW can read the same baseline and the last
+            #    atomic rename silently reverts the other side's unrelated
+            #    settings. Held ACROSS the offload for exactly the reason
+            #    api_mcp_gateway_set_stub holds it across its own offload.
+            # 3. ``bridges._mcp_lock(target=installed_path)``
+            #    (~/.kiro/agents/kirocrew.lock) is the FILE lock. The transaction
+            #    lock does not cover it: apps/bridges.py does whole-file
+            #    read-modify-writes of THIS SAME file under that separate flock
+            #    (app enable/disable, MCP (de)registration). Holding only the
+            #    transaction lock leaves a concurrent app enable and this PUT
+            #    each writing the whole file, and the last atomic rename silently
+            #    discards the other side's changes.
+            #
+            # Order is transaction → config → file and must stay that way. Each
+            # edge already exists in the tree and none is inverted anywhere:
+            # transaction→config at api_mcp_toggle / api_mcp_toggle_all /
+            # api_mcp_remove in handlers/mcp.py, config→file wherever
+            # ``_sync_mcp_to_agent`` runs under the config lock (api_mcp_remove,
+            # api_mcp_server_detail, mcp_discover, api_capability_mcp_install),
+            # and no config-lock or file-lock holder in the tree acquires the
+            # transaction lock inside, so there is no ABBA cycle. The file lock is
+            # taken inside the worker thread (by _write_installed_config_locked,
+            # reached from _commit_agent_config) — a blocking flock on the event
+            # loop would freeze the gateway while app registration holds it.
+            # Nothing else in this branch takes a cross-process lock: governance +
+            # SEL and agent_state take none.
+            #
+            # PHASE 1 ── gather and decide. Nothing below is durable.
+            #
             # Track tools the user intentionally removed from shipped defaults
             # so they don't reappear on upgrade.  Stored in ~/.kiro/crew/config.json
             # (NOT kirocrew.json — kiro-cli rejects unknown fields).
             # Per-key dict so removing from allowedTools only doesn't affect tools.
+            #
+            # Computed from the SUBMITTED config, before the governance filter
+            # below runs: a ceiling-withheld allowedTools ref is not a user
+            # removal, and diffing after the filter would record it as one and
+            # suppress that tool on every future upgrade.
             shipped = get_shipped_tools()
             removed_per_key: dict[str, list[str]] = {}
             for key in ("tools", "allowedTools"):
@@ -232,21 +423,14 @@ async def api_agent_config(request: web.Request) -> web.Response:
                 if diff:
                     removed_per_key[key] = diff
             mc_cfg_path = _h.config_path()  # type: ignore[operator]
-            # Fail closed: writing back a {} baseline would drop every other
-            # setting just to record removedTools. See read_config_for_update.
-            try:
-                mc_cfg = read_config_for_update(mc_cfg_path)
-            except ConfigReadError:
-                logger.exception("Refusing to record removedTools: config unreadable")
-                return web.json_response(
-                    {"error": "failed to read config file", "code": "config_unreadable"},
-                    status=500,
-                )
-            if removed_per_key:
-                mc_cfg["removedTools"] = removed_per_key
-            else:
-                mc_cfg.pop("removedTools", None)
-            write_config_atomically(mc_cfg_path, mc_cfg)
+            # Only trust a submitted name when it is a non-empty string — any
+            # other JSON type (list, dict, number) would flow into the sidecar
+            # helper as a dict key and crash the endpoint with a 500.
+            raw_name = config.get("name")
+            name = (
+                raw_name if isinstance(raw_name, str) and raw_name.strip() else installed_path.stem
+            )
+
             # Governance floor on the WHOLE-object write path: this handler
             # persists the request's config verbatim, so a dashboard PUT could
             # otherwise restore a ceiling-governed @denied grant or a governed
@@ -257,30 +441,63 @@ async def api_agent_config(request: web.Request) -> web.Response:
             # Offloaded: the filter resolves the ceiling AND scans the profile
             # directory per ref, which is synchronous filesystem work — running it
             # inline would stall the aiohttp event loop for the duration.
+            #
+            # In phase 1, so it runs OFF the transaction lock: it mutates *config*
+            # in memory and persists nothing, and the ceiling it consults is not
+            # guarded by that lock, so holding the lock across a per-ref directory
+            # scan would stall every MCP transaction for no consistency gain. A
+            # cancellation at this await predates every durable write.
             await asyncio.to_thread(sanitize_agent_config_governance, config)
-            # Never persist Kiro Crew bookkeeping into the kiro spec —
-            # kiro-cli rejects unknown fields and drops the agent (#2570).
-            # Offloaded like the governance filter above: this reads/writes the
-            # agent_model_state.json sidecar, the same class of synchronous
-            # filesystem work that would otherwise stall the event loop.
-            # Only trust a submitted name when it is a non-empty string — any
-            # other JSON type (list, dict, number) would flow into the sidecar
-            # helper as a dict key and crash the endpoint with a 500.
-            raw_name = config.get("name")
-            name = raw_name if isinstance(raw_name, str) and raw_name.strip() else installed_path.stem
-            changed = await asyncio.to_thread(agent_state.lift_and_strip_bookkeeping, config, name)
+
+            from kiro_crew.dashboard.handlers.mcp import (
+                _get_mcp_lock,
+                _offload_config_write,
+            )
+
+            # PHASE 2 ── commit. Both locks are acquired ahead of every durable
+            # write, so a cancellation at the (unbounded, contended) flock wait
+            # inside ``__aenter__`` still tears nothing.
+            async with _get_mcp_lock():
+                # The config lock spans the whole read-modify-write, not just the
+                # write: the read now happens in the worker thread, so this is
+                # the only thing serializing this PUT's RMW against the sibling
+                # ``config.json`` writers that take the same lock.
+                async with _get_config_lock():
+                    # THE one durable step: the config.json read + removedTools
+                    # sidecar + bookkeeping sidecar + installed spec, in a worker
+                    # thread, behind the shield.
+                    #
+                    # ``_offload_config_write`` is what binds the unit to the
+                    # locks: a worker thread cannot be cancelled, and the shield's
+                    # drain loop keeps re-absorbing cancellations until the worker
+                    # is done, so this await cannot return or raise — and
+                    # therefore ``async with`` cannot run ``__aexit__`` — while a
+                    # write is still in flight. A bare ``to_thread`` per write
+                    # would instead give every write boundary a cancellation point
+                    # at which the locks are released with the worker still
+                    # writing.
+                    try:
+                        changed = await _offload_config_write(
+                            _commit_agent_config,
+                            config=config,
+                            name=name,
+                            mc_cfg_path=mc_cfg_path,
+                            removed_per_key=removed_per_key,
+                            installed_path=installed_path,
+                        )
+                    except ConfigReadError:
+                        # The unit's FIRST step, so this 500 is exact: no write of
+                        # the unit has run and all three targets are unchanged.
+                        logger.exception("Refusing to record removedTools: config unreadable")
+                        return web.json_response(
+                            {"error": "failed to read config file", "code": "config_unreadable"},
+                            status=500,
+                        )
             if changed:
                 logger.info(
                     "Stripped Kiro Crew bookkeeping keys from a PUT to agent config for %r",
                     name,
                 )
-            # Offloaded + atomic: a crash or disk-full mid-write on a bare
-            # write_text would leave the spec truncated and break every
-            # subsequent session start (kiro-cli reads this file at spawn).
-            # write_config_atomically writes to a temp file then os.replace,
-            # matching the same pattern already used for the mc_cfg sidecar
-            # above (line 239) and the other config writes in this file.
-            await asyncio.to_thread(write_config_atomically, installed_path, config)
             # Restart kiro-cli sessions so new config takes effect
             await _h._reset_all_sessions(request)
             return web.json_response({"ok": True, "applied": True})
@@ -742,6 +959,7 @@ async def api_agents_installed(request: web.Request) -> web.Response:
     (``resolve_agent_bindings(..., project_dir=...)``), spawn validation, and
     Slack — see ``agent_discovery.project_agent_names``.
     """
+
     # list_agents() does glob + per-file resolve(strict=True) + read_bytes +
     # json.loads over ~/.kiro/agents — blocking filesystem work that, on a large
     # agents dir (network home, many project-registry agents), can stall the
@@ -974,8 +1192,11 @@ def _cc_models(request: web.Request, configured_default: str = "") -> list[dict]
             # After "auto", never before it: "auto" is the configured default in
             # the general case and leads the list.
             merged.insert(
-                1 if merged and _normalize_model_key(merged[0].get("model_name", "")) == "auto"
-                else 0,
+                (
+                    1
+                    if merged and _normalize_model_key(merged[0].get("model_name", "")) == "auto"
+                    else 0
+                ),
                 {
                     "model_name": canonical_default,
                     "display_name": canonical_default,
@@ -1888,9 +2109,7 @@ async def api_kirocrew_agents_create(request: web.Request) -> web.Response:
             return web.json_response({"error": f"Agent '{name}' already exists"}, status=409)
         model_reason = _model_pin_rejected(model, request, cfg.agent.provider)
         if model_reason:
-            return web.json_response(
-                {"error": model_reason, "code": "invalid_model"}, status=400
-            )
+            return web.json_response({"error": model_reason, "code": "invalid_model"}, status=400)
         cfg.agents[name] = KiroCrewAgentConfig(
             kiro_agent=kiro_agent,
             workspace=body.get("workspace", "default"),
