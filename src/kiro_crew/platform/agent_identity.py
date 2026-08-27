@@ -16,6 +16,7 @@ import logging
 from typing import Any, Mapping
 
 from kiro_crew.constants import (
+    CRON_NOTIFY_PREFIX,
     SUBAGENT_BATCH_COMPLETION_PREFIX,
     SUBAGENT_COMPLETION_PREFIX,
 )
@@ -23,10 +24,6 @@ from kiro_crew.platform.context import async_safe_context_call, current_context
 from kiro_crew.platform.interfaces import SessionPrincipal
 
 logger = logging.getLogger(__name__)
-
-# Same prefix as ``dashboard.state.CRON_NOTIFY_PREFIX`` / injected-messages.md.
-# Duplicated here so this platform module does not import the dashboard layer.
-_CRON_NOTIFY_PREFIX = "[Cron notification from "
 
 # Keys a tool_input dict must never be allowed to use as identity. The core
 # already knows surface / raw_id / session_key; taking any of these from the
@@ -86,37 +83,47 @@ def derive_session_principal(
 
 
 def is_injected_envelope(text: str) -> bool:
-    """True when *text* is a cron / subagent-completion injection, not a user."""
+    """True when *text* is a cron / subagent-completion injection, not a user.
+
+    This is the skip/bind discriminator. Callers that only need a boolean
+    (``principal_bind_kwargs``, ``_run_chat``) should use this, not
+    :func:`derive_session_principal_for_injected`.
+    """
     return (
-        text.startswith(_CRON_NOTIFY_PREFIX)
+        text.startswith(CRON_NOTIFY_PREFIX)
         or text.startswith(SUBAGENT_COMPLETION_PREFIX)
         or text.startswith(SUBAGENT_BATCH_COMPLETION_PREFIX)
     )
 
 
 def derive_session_principal_for_injected(text: str) -> SessionPrincipal | None:
-    """Injected envelopes are not a user. Always ``None`` for those prefixes.
+    """Return ``None`` iff *text* is an injected envelope; raise otherwise.
 
     ``[Cron notification from "job"]`` and ``[Subagent completion event]``
     arrive from automation, not from a human. Do not mint a user-bound
-    principal (or later a user-bound token) for them. For any other text
-    this helper is not the identity source — callers must not treat a
-    ``None`` here as "skip bind" unless :func:`is_injected_envelope` is
-    also true.
+    principal (or later a user-bound token) for them.
+
+    A normal user message is not this helper's input: it raises
+    ``ValueError`` so a silent ``None`` cannot mean both "injected, skip
+    bind" and "not this helper's job". Callers that only need the boolean
+    must use :func:`is_injected_envelope`.
     """
     if is_injected_envelope(text):
         return None
-    return None
+    raise ValueError(
+        "derive_session_principal_for_injected is only for injected envelopes; "
+        f"{text!r} is a user message — use is_injected_envelope to decide"
+    )
 
 
 def principal_bind_kwargs(message: str, *, surface: str, raw_id: str) -> dict[str, str]:
     """``surface`` / ``raw_id`` for ``publish_turn_identity``, or ``{}``.
 
-    Empty when *message* is an injected envelope: ``derive_session_principal_for_injected``
-    returns ``None`` (not a user), so the caller publishes the pid sidecar
-    only. An ordinary user turn still binds.
+    Empty when :func:`is_injected_envelope` is true: the envelope is not a
+    user, so the caller publishes the pid sidecar only. An ordinary user
+    turn still binds.
     """
-    if is_injected_envelope(message) and derive_session_principal_for_injected(message) is None:
+    if is_injected_envelope(message):
         return {}
     return {"surface": surface, "raw_id": raw_id}
 

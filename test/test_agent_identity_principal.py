@@ -86,6 +86,28 @@ def test_injected_subagent_envelope_does_not_derive_a_user() -> None:
     assert derive_session_principal_for_injected(SUBAGENT_COMPLETION_PREFIX) is None
 
 
+def test_ordinary_user_message_raises_on_injected_helper() -> None:
+    """The helper is a discriminator: None iff injected. ``\"hello\"`` must not
+    look like \"not a user\" — that silent None is how a skip-bind check
+    would fire for every turn.
+    """
+    from kiro_crew.platform.agent_identity import derive_session_principal_for_injected
+
+    with pytest.raises(ValueError, match="injected"):
+        derive_session_principal_for_injected("hello")
+
+
+def test_cron_notify_prefix_is_shared_not_copied() -> None:
+    """A second copy in agent_identity can drift from the envelope owner."""
+    from kiro_crew.constants import CRON_NOTIFY_PREFIX
+    from kiro_crew.dashboard.state import CRON_NOTIFY_PREFIX as state_prefix
+    from kiro_crew.platform import agent_identity
+
+    assert not hasattr(agent_identity, "_CRON_NOTIFY_PREFIX")
+    assert state_prefix == CRON_NOTIFY_PREFIX
+    assert agent_identity.is_injected_envelope(f'{CRON_NOTIFY_PREFIX}"job"]')
+
+
 def test_subagent_inherits_parent_subject() -> None:
     from kiro_crew.platform.agent_identity import inherit_parent_principal
 

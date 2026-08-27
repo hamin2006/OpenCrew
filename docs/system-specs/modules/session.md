@@ -318,7 +318,7 @@ key. `user_jwt` stays `None` until a companion annotates.
 | CLI | `cli+{os_user}` |
 | Cron / TaskRunner | `cron+{job_owner}` |
 | Subagent | inherit parent `subject`; child's `session_key` |
-| Injected cron / subagent-completion envelopes | **not a user** — `derive_session_principal_for_injected` returns `None` |
+| Injected cron / subagent-completion envelopes | **not a user** — `is_injected_envelope` is true; `derive_session_principal_for_injected` returns `None`. A normal user message raises `ValueError` so a silent `None` cannot look like "skip bind". |
 
 The session-start hook is `messaging.identity.publish_turn_identity`.
 Every turn-running surface already calls it with the existing
@@ -335,11 +335,14 @@ and a core-derived `raw_id`, the same function binds the principal:
 
 Dashboard chat (`chat_runner._run_chat`) is the first wired caller:
 `surface="dashboard"`, `raw_id=state.owner_id` or the local OS user.
-When the turn text is an injected envelope
-(`derive_session_principal_for_injected` returns `None` for
-`[Cron notification` / `[Subagent completion event]`), `_run_chat`
-omits `surface` / `raw_id` so only the pid sidecar is published —
-the envelope is not a user and must not bind `dashboard+{owner}`.
+When the turn text is an injected envelope (`is_injected_envelope`
+is true for `[Cron notification` / `[Subagent completion event]`),
+`principal_bind_kwargs` omits `surface` / `raw_id` so only the pid
+sidecar is published — the envelope is not a user and must not bind
+`dashboard+{owner}`. `derive_session_principal_for_injected` is the
+same discriminator expressed as `None` (injected) or `ValueError`
+(anything else); callers that only need the boolean must use
+`is_injected_envelope`.
 Channel dispatchers can pass `{channel_type, provider_user_id}` the
 same way without a second session key. `tool_input` cannot supply
 `subject` / `userId` — `reject_tool_input_identity` refuses those
