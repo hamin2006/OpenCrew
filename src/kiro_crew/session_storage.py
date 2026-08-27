@@ -358,8 +358,13 @@ def _scan_key(sid_for_stem: Mapping[str, str]) -> tuple[object, ...]:
     session that gained or lost its mapping must not be answered from an older
     pass. The mapping is compared directly by dict equality — still by value,
     never hashed — because a hash collision here would serve a pass built under
-    different assumptions, and the whole point of the key is that it cannot. Dict
-    equality is order-free, so no sort is paid on the hot cache-hit path.
+    different assumptions, and the whole point of the key is that it cannot.
+    Embedding the dict makes the key tuple unhashable, so "never hashed" is
+    enforced by the interpreter rather than by convention, and the hit check
+    is linear — one dict copy plus one dict compare — with no sort. The
+    ``dict()`` copy is load-bearing:
+    it snapshots the pairing, so a caller's later in-place edit cannot mutate
+    the stored key in lockstep and masquerade as a hit.
     """
     return (
         str(kiro_sessions_dir()),
