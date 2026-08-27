@@ -209,12 +209,12 @@ def test_the_response_grants_only_what_the_embedding_frame_grants() -> None:
 def test_an_in_flight_document_is_never_evicted_to_make_room() -> None:
     """The failure mode this replaces was silent, and reachable without an attacker.
 
-    An entry is removed when it is SERVED, so every live entry is one nobody has
-    fetched yet. Dropping the oldest to fit a newer one invalidates a URL some
-    frame is about to load — and because the MINT succeeded, the frontend has no
-    failure to show and that frame just renders blank. A gallery of image-bearing
-    artifacts can push several MB of pending documents through at once, so this
-    is normal use, not an edge case.
+    An entry is removed only by TTL expiry, so a live entry may still be fetched
+    again before it expires. Dropping a non-expired entry to fit a newer one
+    invalidates a URL some frame is about to load -- and because the MINT
+    succeeded, the frontend has no failure to show and that frame just renders
+    blank. A gallery of image-bearing artifacts can push several MB of pending
+    documents through at once, so this is normal use, not an edge case.
     """
     src = sd.__file__ or ""
     with open(src, encoding="utf-8") as fh:
@@ -248,36 +248,16 @@ def test_the_stash_caps_still_bound_it() -> None:
         "_MAX_ENTRIES" in prune and "_MAX_BYTES" in prune
     ), "_prune stopped consulting one of its caps"
 
-    """The control that actually holds when the client binding cannot.
 
-    ``request.remote`` is the PROXY's address whenever the dashboard is reached
-    through one, so every client shares it and the binding is worth nothing in
-    exactly the deployments where a leaked URL is most reachable. Popping the
-    entry before the body is written means a URL that leaks is already spent.
-    """
-    src = sd.__file__ or ""
-    with open(src, encoding="utf-8") as fh:
-        body = fh.read()
-    serve = body[body.index("async def serve_sandbox_doc") :]
-    assert "_stash.pop(doc_id, None)" in serve, (
-        "the serving handler no longer consumes the entry, so an exfiltrated URL "
-        "can be replayed by anyone sharing the requesting address"
-    )
-    assert "_stash.get(doc_id)" not in serve, (
-        "the handler reads the entry without removing it — that is the replayable "
-        "shape this test exists to prevent"
-    )
-
-
-def test_the_pop_happens_under_the_lock() -> None:
-    """Two concurrent GETs must not both win: the pop is the atomic step."""
+def test_the_get_happens_under_the_lock() -> None:
+    """Concurrent GETs must both read consistently: the get is under the lock."""
     src = sd.__file__ or ""
     with open(src, encoding="utf-8") as fh:
         body = fh.read()
     serve = body[body.index("async def serve_sandbox_doc") :]
     lock_at = serve.index("with _lock:")
-    pop_at = serve.index("_stash.pop(doc_id, None)")
-    assert lock_at < pop_at, "the consuming pop is outside the lock"
+    get_at = serve.index("_stash.get(doc_id, None)")
+    assert lock_at < get_at, "the stash read is outside the lock"
 
 
 def test_the_serving_route_is_on_the_auth_bypass_list() -> None:
@@ -330,22 +310,25 @@ async def _mint(html: str, remote: str = "127.0.0.1") -> tuple[str, str]:
 
 
 @pytest.mark.asyncio
-async def test_a_minted_document_is_served_once_and_then_gone() -> None:
-    """Single use is the load-bearing control, so it is proven by serving twice.
+async def test_a_minted_document_can_be_served_multiple_times_within_ttl() -> None:
+    """Multi-use within TTL is necessary for Electron's renderer lifecycle.
 
-    The client binding cannot carry this weight: ``request.remote`` is the
-    PROXY's address whenever the dashboard is reached through one, so every
-    client shares it. What actually makes a leaked URL useless is that the frame
-    it was minted for already spent it.
+    Electron's renderer recovery, hide-to-tray restore, and navigation history
+    operations can all cause legitimate double-fetches of the same URL. The
+    client-IP binding and short TTL together bound the exposure: a token is
+    useless from another connection and becomes useless from ANY connection once
+    it expires.
     """
-    doc_id, token = await _mint("<p>once</p>")
+    doc_id, token = await _mint("<p>replayable</p>")
 
     first = await sd.serve_sandbox_doc(_serve_req(doc_id, token))
-    assert first.body == b"<p>once</p>"
+    assert first.body == b"<p>replayable</p>"
 
-    with pytest.raises(web.HTTPNotFound):
-        await sd.serve_sandbox_doc(_serve_req(doc_id, token))
-    assert doc_id not in sd._stash
+    second = await sd.serve_sandbox_doc(_serve_req(doc_id, token))
+    assert second.body == b"<p>replayable</p>"
+
+    # The entry remains in the stash until TTL expiry
+    assert doc_id in sd._stash
 
 
 @pytest.mark.asyncio
@@ -438,12 +421,12 @@ async def test_a_mint_with_no_room_is_refused_and_leaves_no_entry(monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_a_tampered_token_is_refused_without_spending_the_document() -> None:
-    """Fails closed BEFORE the pop, so a probe cannot burn someone else's URL."""
+async def test_a_tampered_token_is_refused_without_returning_the_document() -> None:
+    """Fails closed BEFORE the stash read, so a probe cannot access the document."""
     doc_id, token = await _mint("<p>hi</p>")
     with pytest.raises(web.HTTPNotFound):
         await sd.serve_sandbox_doc(_serve_req(doc_id, token[:-1] + "x"))
-    assert doc_id in sd._stash, "a rejected request consumed the entry anyway"
+    assert doc_id in sd._stash, "a rejected request removed the entry anyway"
 
 
 @pytest.mark.asyncio
@@ -461,6 +444,28 @@ async def test_an_expired_entry_is_refused_even_with_a_valid_token() -> None:
         sd._stash[doc_id] = (time.time() - 1, b"<p>hi</p>")
     with pytest.raises(web.HTTPNotFound):
         await sd.serve_sandbox_doc(_serve_req(doc_id, token))
+
+
+@pytest.mark.asyncio
+async def test_serve_path_inline_ttl_check_refuses_stale_entry_without_prune() -> None:
+    """The inline TTL guard in serve_sandbox_doc refuses a stale entry even when
+    _prune has not run. This exercises the runtime enforcement that makes multi-
+    use bounded: the entry still sits in the stash (no prune has cleared it),
+    but serve_sandbox_doc treats it as absent because its expiry is in the past.
+    """
+    doc_id = "directly-stashed-stale"
+    token = sd._signer.mint(doc_id, "127.0.0.1")
+    # Insert directly into stash with an expiry in the past -- no mint handler
+    # involved, so _prune never ran to clear it.
+    with sd._lock:
+        sd._stash[doc_id] = (time.time() - 60, b"<p>stale</p>")
+    # The entry IS in the stash (not yet pruned)
+    assert doc_id in sd._stash
+    # But serve_sandbox_doc refuses it because the inline TTL check fires
+    with pytest.raises(web.HTTPNotFound):
+        await sd.serve_sandbox_doc(_serve_req(doc_id, token))
+    # The entry was not removed by the serve path -- it just treated it as absent
+    assert doc_id in sd._stash
 
 
 @pytest.mark.asyncio

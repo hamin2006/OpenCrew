@@ -88,6 +88,7 @@ const { initMochi, shutdownMochi } = require("./mochi/index");
 const { borrowSessionToken } = require("./mochi-session-token");
 const { initCrewCompanion, shutdownCrewCompanion } = require("./crew-companion/index");
 const { clampZoomFactor, stepZoomFactor } = require("./zoom");
+const { stripFrameAncestorsForSandboxDoc } = require("./sandbox-doc-headers");
 const { createBrowserViewManager, isUntrustedContents } = require("./browser-view");
 const {
   canAgentControl,
@@ -2075,6 +2076,37 @@ function setupWindowContents(win, backendUrl) {
   view.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
     delete details.requestHeaders["Referer"];
     callback({ requestHeaders: details.requestHeaders });
+  });
+
+  // Strip frame-ancestors from CSP on sandbox-doc responses so the iframe loads
+  // regardless of origin spelling (localhost vs 127.0.0.1). The sandbox directive
+  // is left intact -- that is the security-critical control that gives the
+  // document an opaque origin.
+  view.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    const headers = details.responseHeaders;
+    if (!headers) return callback({ responseHeaders: headers });
+    // Early return for non-sandbox-doc URLs to skip the flat-array allocation.
+    try {
+      if (!new URL(details.url).pathname.startsWith("/sandbox-doc/")) {
+        return callback({ responseHeaders: headers });
+      }
+    } catch {
+      return callback({ responseHeaders: headers });
+    }
+    // Electron provides responseHeaders as an object with arrays for values, but
+    // onHeadersReceived also accepts the flat array-of-{name,value} form. Convert
+    // the object form to the flat form for the helper, then convert back.
+    const flat = Object.entries(headers).flatMap(([name, values]) =>
+      (Array.isArray(values) ? values : [values]).map((value) => ({ name, value })),
+    );
+    const modified = stripFrameAncestorsForSandboxDoc(flat, details.url);
+    // Convert back to the object form Electron expects.
+    const out = {};
+    for (const { name, value } of modified) {
+      if (!out[name]) out[name] = [];
+      out[name].push(value);
+    }
+    callback({ responseHeaders: out });
   });
 }
 

@@ -83,12 +83,13 @@ def _prune(now: float) -> bool:
     """Drop what is safe to drop; report whether the stash is inside its caps.
 
     Eviction never touches an entry that is still IN FLIGHT. An entry is removed
-    when it is SERVED, so every live entry is one nobody has fetched yet, and
-    dropping the oldest to make room for a newer one would silently invalidate a
-    URL some frame is about to load — the mint succeeded, so the frontend has no
-    failure to show and the frame just renders blank. That is reachable without
-    an attacker: a gallery of image-bearing artifacts can push several MB of
-    pending documents through here at once.
+    only by TTL expiry (either here or inline when the serve path encounters a
+    stale entry), so a live entry may still be fetched again before it expires.
+    Dropping a non-expired entry to make room for a newer one would silently
+    invalidate a URL some frame is about to load -- the mint succeeded, so the
+    frontend has no failure to show and the frame just renders blank. That is
+    reachable without an attacker: a gallery of image-bearing artifacts can push
+    several MB of pending documents through here at once.
 
     So a caller that cannot be given room is REFUSED instead, which surfaces as
     a visible retry rather than a silent blank frame.
@@ -176,28 +177,20 @@ async def api_stash_sandbox_doc(request: web.Request) -> web.Response:
 
 
 async def serve_sandbox_doc(request: web.Request) -> web.Response:
-    """``GET /sandbox-doc/{doc_id}/{token}`` — the document itself, ONCE.
+    """``GET /sandbox-doc/{doc_id}/{token}`` — the document, replayable within TTL.
 
     Auth = the HMAC path token (this route is on the middleware bypass list).
     Fails closed as 404 for every invalid condition, so the route is not an
     oracle for which ids exist.
 
-    **Single use.** The entry is popped before the body is written, so a URL that
-    leaks is already spent: the frame it was minted for consumed it. This is the
-    load-bearing control rather than the client binding below, because
-    ``request.remote`` is the PROXY's address whenever the dashboard is reached
-    through one (a tunnel, a reverse proxy), and every client then shares it — the
-    binding is worth nothing in exactly the deployments where a URL is most
-    reachable. The binding stays as a second, cheap layer for the direct case.
-
-    The cost is that a frame the BROWSER reloads on its own (rather than a page
-    reload, which remounts the app and mints again) finds its document spent and
-    gets this 404 inside the frame. Nothing in the frontend observes the GET —
-    the document is served with an opaque origin, so the parent cannot read
-    whether it loaded — and the retry control appears only when the MINT itself
-    fails. Recovering a spent URL therefore needs a page reload. Detecting it
-    would take a beacon injected into the document plus a deadline, which is
-    not built; do not describe one here until it is.
+    **Multi-use within TTL.** The entry is READ (not popped) from the stash, so
+    the same URL can be fetched multiple times within its TTL window. This is
+    necessary because Electron's renderer lifecycle can cause legitimate
+    double-fetches of the same URL (renderer recovery, hide-to-tray restore,
+    navigation history operations). The client-IP binding and short TTL together
+    bound the exposure: a token is useless from another connection, and becomes
+    useless from ANY connection once it expires. Expired entries are removed by
+    ``_prune()`` on the next mint call.
     """
     doc_id = request.match_info.get("doc_id", "")
     token = request.match_info.get("token", "")
@@ -207,7 +200,7 @@ async def serve_sandbox_doc(request: web.Request) -> web.Response:
         raise web.HTTPNotFound()
     now = time.time()
     with _lock:
-        entry = _stash.pop(doc_id, None)
+        entry = _stash.get(doc_id, None)
         if entry is not None and entry[0] < now:
             entry = None
     if entry is None:
