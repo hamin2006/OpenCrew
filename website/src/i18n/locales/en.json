@@ -6326,6 +6326,19 @@
       "worktrees_created_under_a_previous_repository_na": "Worktrees created under a previous repository name. Hidden by default; still covered by Prune merged."
     },
     "developer": {
+      "agentBackendTab": {
+        "agent_backend": "Agent Backend",
+        "claude_code": "Claude Code",
+        "claude_code_over_acp_only_the_amazon_internal_ed": "Claude Code over ACP. Only the Amazon internal edition serves it, and it selects it with an environment variable rather than this setting.",
+        "could_not_save_the_agent_backend": "Could not save the agent backend.",
+        "kas_kiro_agent": "KAS (kiro-agent)",
+        "kiro_agent_over_acp_run_from_the_copy_kiro_cli_u": "kiro-agent over ACP, run from the copy kiro-cli unpacks. Chat works, but subagent progress is not reported natively yet.",
+        "kiro_cli": "Kiro CLI",
+        "kiro_cli_over_acp_the_default_full_mcp_tools_int": "kiro-cli over ACP. The default: full MCP tools, interactive approval, and the OS sandbox.",
+        "loading_configuration": "Loading configuration…",
+        "not_available_in_this_build": "Not available in this build",
+        "which_acp_agent_drives_a_session_applies_to_new": "Which ACP agent drives a session. Applies to new sessions; ones already running keep the backend they started with."
+      },
       "featurePreviewsTab": {
         "inbound_webhook_tokens_registered_contexts_and_r": "Inbound webhook tokens, registered contexts, and run history. The API works; the page is not finished.",
         "open_webhooks": "Open Webhooks",

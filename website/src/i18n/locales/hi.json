@@ -9540,6 +9540,19 @@
       "no_checkout_found_action": "नीचे दिया एनवायरनमेंट वेरिएबल सेट करो, या इसे स्थायी बनाने के लिए {{productName}} डेटा डायरेक्टरी (डिफ़ॉल्ट रूप से ~/.kiro/crew) की config.json में dev_fleet.repo_path जोड़ो, फिर गेटवे को पुनः आरंभ करो।"
     },
     "developer": {
+      "agentBackendTab": {
+        "agent_backend": "एजेंट बैकएंड",
+        "claude_code": "Claude Code",
+        "claude_code_over_acp_only_the_amazon_internal_ed": "ACP पर Claude Code। इसे केवल Amazon का आंतरिक संस्करण उपलब्ध कराता है, और वह इसे इस सेटिंग के बजाय एक एनवायरनमेंट वेरिएबल से चुनता है।",
+        "could_not_save_the_agent_backend": "एजेंट बैकएंड सहेजा नहीं जा सका।",
+        "kas_kiro_agent": "KAS (kiro-agent)",
+        "kiro_agent_over_acp_run_from_the_copy_kiro_cli_u": "ACP पर kiro-agent, जो kiro-cli द्वारा निकाली गई प्रति से चलता है। चैट काम करती है, लेकिन सबएजेंट की प्रगति अभी नेटिव रूप से रिपोर्ट नहीं होती।",
+        "kiro_cli": "Kiro CLI",
+        "kiro_cli_over_acp_the_default_full_mcp_tools_int": "ACP पर kiro-cli। डिफ़ॉल्ट विकल्प: पूरे MCP टूल, इंटरैक्टिव अनुमोदन और ऑपरेटिंग सिस्टम सैंडबॉक्स।",
+        "loading_configuration": "कॉन्फ़िगरेशन लोड हो रहा है…",
+        "not_available_in_this_build": "इस बिल्ड में उपलब्ध नहीं है",
+        "which_acp_agent_drives_a_session_applies_to_new": "कौन-सा ACP एजेंट सत्र चलाता है। यह नए सत्रों पर लागू होता है; पहले से चल रहे सत्र उसी बैकएंड पर बने रहते हैं जिससे वे शुरू हुए थे।"
+      },
       "featurePreviewsTab": {
         "inbound_webhook_tokens_registered_contexts_and_r": "इनबाउंड वेबहुक टोकन, पंजीकृत संदर्भ और रन इतिहास. API काम करता है, पेज अभी पूरा नहीं हुआ है.",
         "open_webhooks": "वेबहुक खोलें",
@@ -9549,6 +9562,10 @@
     "developerPage": {
       "developer": "डेवलपर",
       "tabs": {
+        "agentBackend": {
+          "description": "नए सत्र कौन-सा ACP एजेंट शुरू करते हैं — Kiro CLI, Claude Code या KAS",
+          "label": "एजेंट बैकएंड"
+        },
         "archive": {
           "description": "घुमाया/संक्षिप्त किया गया सत्र इतिहास (7 दिन तक रखा जाता है)",
           "label": "संग्रह"

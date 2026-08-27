@@ -383,7 +383,11 @@ interface SettingsButtonGroupProps {
   description?: string
   hint?: string
   value: string
-  options: { value: string; label: string; icon?: React.ReactNode }[]
+  /** `disabled` on an OPTION keeps the choice visible but unselectable — for a
+   *  value this build knows about but cannot serve. Renders the full vocabulary
+   *  rather than hiding it, so the control does not silently change shape
+   *  between builds and the reader can see what exists. */
+  options: { value: string; label: string; icon?: React.ReactNode; disabled?: boolean }[]
   onChange: (value: string) => void
   disabled?: boolean
   /** Backend config key this button group writes. */
@@ -412,7 +416,7 @@ export function SettingsButtonGroup({ label, description, hint, value, options, 
           <button
             key={o.value}
             type="button"
-            disabled={disabled}
+            disabled={disabled || o.disabled}
             aria-pressed={value === o.value}
             className={`flex items-center gap-1.5 px-3 py-[5px] rounded-md text-[13px] cursor-pointer border transition-colors ${
               value === o.value

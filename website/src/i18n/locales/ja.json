@@ -9391,6 +9391,19 @@
       "no_checkout_found_action": "下記の環境変数を設定するか、設定を永続化するには {{productName}} データディレクトリ（既定では ~/.kiro/crew）の config.json に dev_fleet.repo_path を追加し、ゲートウェイを再起動してください。"
     },
     "developer": {
+      "agentBackendTab": {
+        "agent_backend": "エージェントバックエンド",
+        "claude_code": "Claude Code",
+        "claude_code_over_acp_only_the_amazon_internal_ed": "ACP 経由の Claude Code。Amazon 社内版のみが提供し、この設定ではなく環境変数で選択されます。",
+        "could_not_save_the_agent_backend": "エージェントバックエンドを保存できませんでした。",
+        "kas_kiro_agent": "KAS (kiro-agent)",
+        "kiro_agent_over_acp_run_from_the_copy_kiro_cli_u": "ACP 経由の kiro-agent。kiro-cli が展開したコピーから実行されます。チャットは動作しますが、サブエージェントの進捗はまだネイティブに報告されません。",
+        "kiro_cli": "Kiro CLI",
+        "kiro_cli_over_acp_the_default_full_mcp_tools_int": "ACP 経由の kiro-cli。既定の選択肢で、MCP ツールの全機能、対話的な承認、OS のサンドボックスが使えます。",
+        "loading_configuration": "設定を読み込んでいます…",
+        "not_available_in_this_build": "このビルドでは利用できません",
+        "which_acp_agent_drives_a_session_applies_to_new": "セッションを実行する ACP エージェント。新しいセッションに適用されます。実行中のセッションは開始時のバックエンドを維持します。"
+      },
       "featurePreviewsTab": {
         "inbound_webhook_tokens_registered_contexts_and_r": "受信 Webhook のトークン、登録済みコンテキスト、実行履歴。API は動作しますが、ページは未完成です。",
         "open_webhooks": "Webhooks を開く",
@@ -9400,6 +9413,10 @@
     "developerPage": {
       "developer": "デベロッパー",
       "tabs": {
+        "agentBackend": {
+          "description": "新しいセッションが起動する ACP エージェント — Kiro CLI、Claude Code、KAS",
+          "label": "エージェントバックエンド"
+        },
         "archive": {
           "description": "ローテーション/圧縮済みセッション履歴（7 日間保持）",
           "label": "アーカイブ"

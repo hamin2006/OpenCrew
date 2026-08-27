@@ -9689,6 +9689,19 @@
       "no_checkout_found_action": "Définissez la variable d'environnement ci-dessous, ou ajoutez dev_fleet.repo_path au config.json de votre répertoire de données {{productName}} (~/.kiro/crew par défaut) pour la rendre permanente, puis redémarrez la passerelle."
     },
     "developer": {
+      "agentBackendTab": {
+        "agent_backend": "Backend de l’agent",
+        "claude_code": "Claude Code",
+        "claude_code_over_acp_only_the_amazon_internal_ed": "Claude Code via ACP. Seule l’édition interne d’Amazon le propose, et elle le sélectionne par une variable d’environnement plutôt que par ce paramètre.",
+        "could_not_save_the_agent_backend": "Impossible d’enregistrer le backend de l’agent.",
+        "kas_kiro_agent": "KAS (kiro-agent)",
+        "kiro_agent_over_acp_run_from_the_copy_kiro_cli_u": "kiro-agent via ACP, exécuté depuis la copie décompressée par kiro-cli. Le chat fonctionne, mais la progression des sous-agents n’est pas encore signalée nativement.",
+        "kiro_cli": "Kiro CLI",
+        "kiro_cli_over_acp_the_default_full_mcp_tools_int": "kiro-cli via ACP. Le choix par défaut : outils MCP complets, approbation interactive et bac à sable du système d’exploitation.",
+        "loading_configuration": "Chargement de la configuration…",
+        "not_available_in_this_build": "Non disponible dans cette version",
+        "which_acp_agent_drives_a_session_applies_to_new": "Quel agent ACP exécute une session. S’applique aux nouvelles sessions ; celles déjà en cours conservent le backend avec lequel elles ont démarré."
+      },
       "featurePreviewsTab": {
         "inbound_webhook_tokens_registered_contexts_and_r": "Jetons de webhooks entrants, contextes enregistrés et historique des exécutions. L'API fonctionne, mais la page n'est pas terminée.",
         "open_webhooks": "Ouvrir Webhooks",
@@ -9698,6 +9711,10 @@
     "developerPage": {
       "developer": "Développeur",
       "tabs": {
+        "agentBackend": {
+          "description": "Quel agent ACP les nouvelles sessions démarrent : Kiro CLI, Claude Code ou KAS",
+          "label": "Backend de l’agent"
+        },
         "archive": {
           "description": "Historique des sessions après rotation ou compactage (conservation de 7 jours)",
           "label": "Archives"

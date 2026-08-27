@@ -9540,6 +9540,19 @@
       "no_checkout_found_action": "Setzen Sie die untenstehende Umgebungsvariable oder tragen Sie dev_fleet.repo_path dauerhaft in die config.json in Ihrem {{productName}}-Datenverzeichnis (standardmäßig ~/.kiro/crew) ein und starten Sie dann das Gateway neu."
     },
     "developer": {
+      "agentBackendTab": {
+        "agent_backend": "Agent-Backend",
+        "claude_code": "Claude Code",
+        "claude_code_over_acp_only_the_amazon_internal_ed": "Claude Code über ACP. Nur die interne Amazon-Edition stellt es bereit und wählt es über eine Umgebungsvariable statt über diese Einstellung.",
+        "could_not_save_the_agent_backend": "Das Agent-Backend konnte nicht gespeichert werden.",
+        "kas_kiro_agent": "KAS (kiro-agent)",
+        "kiro_agent_over_acp_run_from_the_copy_kiro_cli_u": "kiro-agent über ACP, ausgeführt aus der von kiro-cli entpackten Kopie. Der Chat funktioniert, aber der Fortschritt von Subagenten wird noch nicht nativ gemeldet.",
+        "kiro_cli": "Kiro CLI",
+        "kiro_cli_over_acp_the_default_full_mcp_tools_int": "kiro-cli über ACP. Die Standardeinstellung: vollständige MCP-Tools, interaktive Genehmigung und die Betriebssystem-Sandbox.",
+        "loading_configuration": "Konfiguration wird geladen…",
+        "not_available_in_this_build": "In diesem Build nicht verfügbar",
+        "which_acp_agent_drives_a_session_applies_to_new": "Welcher ACP-Agent eine Sitzung ausführt. Gilt für neue Sitzungen; bereits laufende behalten das Backend, mit dem sie gestartet sind."
+      },
       "featurePreviewsTab": {
         "inbound_webhook_tokens_registered_contexts_and_r": "Tokens für eingehende Webhooks, registrierte Kontexte und Ausführungsverlauf. Die API funktioniert, die Seite ist noch nicht fertig.",
         "open_webhooks": "Webhooks öffnen",
@@ -9549,6 +9562,10 @@
     "developerPage": {
       "developer": "Entwickler",
       "tabs": {
+        "agentBackend": {
+          "description": "Welchen ACP-Agenten neue Sitzungen starten – Kiro CLI, Claude Code oder KAS",
+          "label": "Agent-Backend"
+        },
         "archive": {
           "description": "Rotierter/verdichteter Sitzungsverlauf (7 Tage Aufbewahrung)",
           "label": "Archiv"

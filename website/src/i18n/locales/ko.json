@@ -9391,6 +9391,19 @@
       "no_checkout_found_action": "아래 환경 변수를 설정하거나, 설정을 유지하려면 {{productName}} 데이터 디렉터리(기본값 ~/.kiro/crew)의 config.json에 dev_fleet.repo_path를 추가한 후 게이트웨이를 다시 시작하세요."
     },
     "developer": {
+      "agentBackendTab": {
+        "agent_backend": "에이전트 백엔드",
+        "claude_code": "Claude Code",
+        "claude_code_over_acp_only_the_amazon_internal_ed": "ACP를 통한 Claude Code. Amazon 내부 에디션에서만 제공되며, 이 설정이 아니라 환경 변수로 선택됩니다.",
+        "could_not_save_the_agent_backend": "에이전트 백엔드를 저장할 수 없습니다.",
+        "kas_kiro_agent": "KAS (kiro-agent)",
+        "kiro_agent_over_acp_run_from_the_copy_kiro_cli_u": "ACP를 통한 kiro-agent로, kiro-cli가 압축을 푼 사본에서 실행됩니다. 채팅은 작동하지만 서브에이전트 진행 상황은 아직 자체적으로 보고되지 않습니다.",
+        "kiro_cli": "Kiro CLI",
+        "kiro_cli_over_acp_the_default_full_mcp_tools_int": "ACP를 통한 kiro-cli. 기본값으로 전체 MCP 도구, 대화형 승인, 운영체제 샌드박스를 사용합니다.",
+        "loading_configuration": "구성을 불러오는 중…",
+        "not_available_in_this_build": "이 빌드에서는 사용할 수 없습니다",
+        "which_acp_agent_drives_a_session_applies_to_new": "세션을 실행하는 ACP 에이전트입니다. 새 세션에 적용되며, 이미 실행 중인 세션은 시작할 때의 백엔드를 유지합니다."
+      },
       "featurePreviewsTab": {
         "inbound_webhook_tokens_registered_contexts_and_r": "수신 웹훅 토큰, 등록된 컨텍스트, 실행 기록입니다. API는 동작하지만 페이지는 아직 완성되지 않았습니다.",
         "open_webhooks": "Webhooks 열기",
@@ -9400,6 +9413,10 @@
     "developerPage": {
       "developer": "개발자",
       "tabs": {
+        "agentBackend": {
+          "description": "새 세션이 시작할 ACP 에이전트 — Kiro CLI, Claude Code 또는 KAS",
+          "label": "에이전트 백엔드"
+        },
         "archive": {
           "description": "순환·압축된 세션 기록(7일간 보관)",
           "label": "아카이브"

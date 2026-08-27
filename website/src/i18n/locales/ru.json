@@ -9838,6 +9838,19 @@
       "no_checkout_found_action": "Задайте переменную окружения ниже или добавьте dev_fleet.repo_path в config.json в каталоге данных {{productName}} (по умолчанию ~/.kiro/crew), чтобы сохранить настройку, затем перезапустите шлюз."
     },
     "developer": {
+      "agentBackendTab": {
+        "agent_backend": "Бэкенд агента",
+        "claude_code": "Claude Code",
+        "claude_code_over_acp_only_the_amazon_internal_ed": "Claude Code по ACP. Его предоставляет только внутренняя сборка Amazon, и выбирается он переменной окружения, а не этой настройкой.",
+        "could_not_save_the_agent_backend": "Не удалось сохранить бэкенд агента.",
+        "kas_kiro_agent": "KAS (kiro-agent)",
+        "kiro_agent_over_acp_run_from_the_copy_kiro_cli_u": "kiro-agent по ACP, запускается из копии, которую распаковывает kiro-cli. Чат работает, но прогресс субагентов пока не сообщается нативно.",
+        "kiro_cli": "Kiro CLI",
+        "kiro_cli_over_acp_the_default_full_mcp_tools_int": "kiro-cli по ACP. Вариант по умолчанию: полный набор инструментов MCP, интерактивное подтверждение и песочница операционной системы.",
+        "loading_configuration": "Загрузка конфигурации…",
+        "not_available_in_this_build": "Недоступно в этой сборке",
+        "which_acp_agent_drives_a_session_applies_to_new": "Какой агент ACP выполняет сессию. Применяется к новым сессиям; уже запущенные сохраняют тот бэкенд, с которым были начаты."
+      },
       "featurePreviewsTab": {
         "inbound_webhook_tokens_registered_contexts_and_r": "Токены входящих вебхуков, зарегистрированные контексты и история запусков. API работает, но страница не доделана.",
         "open_webhooks": "Открыть вебхуки",
@@ -9847,6 +9860,10 @@
     "developerPage": {
       "developer": "Разработчик",
       "tabs": {
+        "agentBackend": {
+          "description": "Какой агент ACP запускают новые сессии — Kiro CLI, Claude Code или KAS",
+          "label": "Бэкенд агента"
+        },
         "archive": {
           "description": "Ротированная и сжатая история сессий (хранение 7 дней)",
           "label": "Архив"

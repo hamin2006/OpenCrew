@@ -9689,6 +9689,19 @@
       "no_checkout_found_action": "Defina a variável de ambiente abaixo, ou adicione dev_fleet.repo_path ao config.json no diretório de dados do {{productName}} (~/.kiro/crew por padrão) para torná-la permanente, e reinicie o gateway."
     },
     "developer": {
+      "agentBackendTab": {
+        "agent_backend": "Backend do agente",
+        "claude_code": "Claude Code",
+        "claude_code_over_acp_only_the_amazon_internal_ed": "Claude Code sobre ACP. Apenas a edição interna da Amazon o oferece, e ela o seleciona por uma variável de ambiente em vez desta configuração.",
+        "could_not_save_the_agent_backend": "Não foi possível salvar o backend do agente.",
+        "kas_kiro_agent": "KAS (kiro-agent)",
+        "kiro_agent_over_acp_run_from_the_copy_kiro_cli_u": "kiro-agent sobre ACP, executado a partir da cópia que o kiro-cli descompacta. O chat funciona, mas o progresso dos subagentes ainda não é informado nativamente.",
+        "kiro_cli": "Kiro CLI",
+        "kiro_cli_over_acp_the_default_full_mcp_tools_int": "kiro-cli sobre ACP. O padrão: ferramentas MCP completas, aprovação interativa e a sandbox do sistema operacional.",
+        "loading_configuration": "Carregando a configuração…",
+        "not_available_in_this_build": "Não disponível nesta build",
+        "which_acp_agent_drives_a_session_applies_to_new": "Qual agente ACP executa uma sessão. Aplica-se às novas sessões; as que já estão em execução mantêm o backend com que foram iniciadas."
+      },
       "featurePreviewsTab": {
         "inbound_webhook_tokens_registered_contexts_and_r": "Tokens de webhooks de entrada, contextos registrados e histórico de execuções. A API funciona; a página não está concluída.",
         "open_webhooks": "Abrir Webhooks",
@@ -9698,6 +9711,10 @@
     "developerPage": {
       "developer": "Desenvolvedor",
       "tabs": {
+        "agentBackend": {
+          "description": "Qual agente ACP as novas sessões iniciam: Kiro CLI, Claude Code ou KAS",
+          "label": "Backend do agente"
+        },
         "archive": {
           "description": "Histórico de sessões rotacionado/compactado (retenção de 7 dias)",
           "label": "Arquivamento"

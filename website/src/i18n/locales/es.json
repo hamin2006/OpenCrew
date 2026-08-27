@@ -9689,6 +9689,19 @@
       "no_checkout_found_action": "Define la variable de entorno de abajo, o añade dev_fleet.repo_path al config.json de tu directorio de datos de {{productName}} (~/.kiro/crew por defecto) para que persista, y reinicia la puerta de enlace."
     },
     "developer": {
+      "agentBackendTab": {
+        "agent_backend": "Backend del agente",
+        "claude_code": "Claude Code",
+        "claude_code_over_acp_only_the_amazon_internal_ed": "Claude Code sobre ACP. Solo la edición interna de Amazon lo ofrece, y lo selecciona mediante una variable de entorno en lugar de esta opción.",
+        "could_not_save_the_agent_backend": "No se pudo guardar el backend del agente.",
+        "kas_kiro_agent": "KAS (kiro-agent)",
+        "kiro_agent_over_acp_run_from_the_copy_kiro_cli_u": "kiro-agent sobre ACP, ejecutado desde la copia que descomprime kiro-cli. El chat funciona, pero el progreso de los subagentes aún no se informa de forma nativa.",
+        "kiro_cli": "Kiro CLI",
+        "kiro_cli_over_acp_the_default_full_mcp_tools_int": "kiro-cli sobre ACP. La opción predeterminada: herramientas MCP completas, aprobación interactiva y la sandbox del sistema operativo.",
+        "loading_configuration": "Cargando la configuración…",
+        "not_available_in_this_build": "No disponible en esta compilación",
+        "which_acp_agent_drives_a_session_applies_to_new": "Qué agente ACP ejecuta una sesión. Se aplica a las sesiones nuevas; las que ya están en curso conservan el backend con el que se iniciaron."
+      },
       "featurePreviewsTab": {
         "inbound_webhook_tokens_registered_contexts_and_r": "Tokens de webhooks entrantes, contextos registrados e historial de ejecuciones. La API funciona; la página no está terminada.",
         "open_webhooks": "Abrir Webhooks",
@@ -9698,6 +9711,10 @@
     "developerPage": {
       "developer": "Desarrollador",
       "tabs": {
+        "agentBackend": {
+          "description": "Qué agente ACP inician las sesiones nuevas: Kiro CLI, Claude Code o KAS",
+          "label": "Backend del agente"
+        },
         "archive": {
           "description": "Historial de sesiones rotado o compactado (retención de 7 días)",
           "label": "Archivo"

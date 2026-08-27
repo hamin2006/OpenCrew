@@ -9689,6 +9689,19 @@
       "no_checkout_found_action": "Imposta la variabile d'ambiente qui sotto, oppure aggiungi dev_fleet.repo_path al config.json nella directory dati di {{productName}} (~/.kiro/crew per impostazione predefinita) per renderla permanente, poi riavvia il gateway."
     },
     "developer": {
+      "agentBackendTab": {
+        "agent_backend": "Backend dell’agente",
+        "claude_code": "Claude Code",
+        "claude_code_over_acp_only_the_amazon_internal_ed": "Claude Code tramite ACP. Solo l’edizione interna di Amazon lo fornisce e lo seleziona con una variabile d’ambiente anziché con questa impostazione.",
+        "could_not_save_the_agent_backend": "Impossibile salvare il backend dell’agente.",
+        "kas_kiro_agent": "KAS (kiro-agent)",
+        "kiro_agent_over_acp_run_from_the_copy_kiro_cli_u": "kiro-agent tramite ACP, eseguito dalla copia estratta da kiro-cli. La chat funziona, ma l’avanzamento dei subagenti non è ancora segnalato in modo nativo.",
+        "kiro_cli": "Kiro CLI",
+        "kiro_cli_over_acp_the_default_full_mcp_tools_int": "kiro-cli tramite ACP. L’impostazione predefinita: strumenti MCP completi, approvazione interattiva e sandbox del sistema operativo.",
+        "loading_configuration": "Caricamento della configurazione…",
+        "not_available_in_this_build": "Non disponibile in questa build",
+        "which_acp_agent_drives_a_session_applies_to_new": "Quale agente ACP esegue una sessione. Vale per le nuove sessioni; quelle già in corso mantengono il backend con cui sono state avviate."
+      },
       "featurePreviewsTab": {
         "inbound_webhook_tokens_registered_contexts_and_r": "Token dei webhook in ingresso, contesti registrati e cronologia delle esecuzioni. L’API funziona, ma la pagina non è finita.",
         "open_webhooks": "Apri Webhooks",
@@ -9698,6 +9711,10 @@
     "developerPage": {
       "developer": "Sviluppatore",
       "tabs": {
+        "agentBackend": {
+          "description": "Quale agente ACP avviano le nuove sessioni: Kiro CLI, Claude Code o KAS",
+          "label": "Backend dell’agente"
+        },
         "archive": {
           "description": "Cronologia delle sessioni ruotata/compressa (conservazione di 7 giorni)",
           "label": "Archivio"
