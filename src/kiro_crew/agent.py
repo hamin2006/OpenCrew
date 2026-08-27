@@ -4301,15 +4301,19 @@ def rebuild_agent_config(*, clean: bool = False) -> Path:
 
                 on_disk_app = {_k for _k in on_disk if ":" in _k and _k not in managed_names}
                 for _k in [k for k in servers if ":" in k and k not in managed_names]:
-                    if not _app_of_key_enabled(_k):
+                    if login_withhold or not _app_of_key_enabled(_k):
                         del servers[_k]
-                for _k, _v in on_disk.items():
-                    # ALWAYS assign, not add-if-missing: on_disk is authoritative
-                    # for app servers, so a concurrent re-registration on a new
-                    # port (same key, new URL) must OVERWRITE our stale snapshot —
-                    # otherwise the dead pre-rebuild URL is persisted.
-                    if _k in on_disk_app:
-                        servers[_k] = _v
+                if not login_withhold:
+                    for _k, _v in on_disk.items():
+                        # ALWAYS assign, not add-if-missing: on_disk is
+                        # authoritative for app servers, so a concurrent
+                        # re-registration on a new port (same key, new URL)
+                        # must OVERWRITE our stale snapshot — otherwise the
+                        # dead pre-rebuild URL is persisted. Login withhold
+                        # skips this copy-back: a prior rebuild's
+                        # ``{app}:{server}`` must not survive.
+                        if _k in on_disk_app:
+                            servers[_k] = _v
             _finalize_and_write()
     else:
         _finalize_and_write()

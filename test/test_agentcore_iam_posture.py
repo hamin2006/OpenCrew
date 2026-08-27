@@ -291,6 +291,36 @@ def test_login_rebuild_withholds_app_mcp(tmp_path: Path, monkeypatch: pytest.Mon
     assert not any("gateway" in name.lower() for name in servers)
 
 
+def test_login_rebuild_drops_ondisk_app_mcp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A prior rebuild's ``{app}:{server}`` must not survive login withhold.
+
+    The live merge path (``is_kirocrew_json``) re-reads on-disk kirocrew.json
+    under the bridges lock and assigns every app-namespaced key back. Both
+    agent-dir overrides must agree or that path stays closed.
+    """
+    from kiro_crew.agent import rebuild_agent_config
+
+    kiro_dir = _seed_rebuild_sources(tmp_path, monkeypatch)
+    leftover = kiro_dir / "kirocrew.json"
+    data = json.loads(leftover.read_text(encoding="utf-8"))
+    data["mcpServers"]["dummyapp:srv"] = {"command": "dummy-srv"}
+    leftover.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr("kiro_crew.apps.bridges.KIRO_AGENTS_DIR", kiro_dir)
+    try:
+        _enable_agentcore("login")
+        rebuild_agent_config()
+    finally:
+        reset_context()
+
+    servers = json.loads(leftover.read_text(encoding="utf-8")).get("mcpServers") or {}
+    assert "dummyapp:srv" not in servers
+    assert "kirocrew-core" in servers
+    assert "kirocrew-cron" in servers
+    assert not any("gateway" in name.lower() for name in servers)
+
+
 def test_login_rebuild_withholds_without_companion_adapter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -76,7 +76,9 @@ kirocrew`). Onto that base:
 
 Steps 1–4 (app-contributed servers, Kiro global, seam globals, crew store)
 and leftover non-managed merge-base servers are skipped when AgentCore
-login withhold is on — see the `spec_gate` section below. The login
+login withhold is on — see the `spec_gate` section below. The final
+on-disk `{app}:{server}` re-merge under `bridges._mcp_lock` is gated the
+same way, so a prior rebuild's app servers are not copied back. The login
 predicate is capability-on plus posture `login`; the companion identity
 adapter does not have to be enabled.
 
