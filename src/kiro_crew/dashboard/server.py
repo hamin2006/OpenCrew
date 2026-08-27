@@ -2634,6 +2634,10 @@ async def start_dashboard(
         resp = await handler(request)  # type: ignore[operator]
         if hasattr(resp, "headers"):
             _apply_security_headers(resp, request.app, request.path, request)
+            # Never cache hashed assets: patched bundles must surface on
+            # reload, not sit in the browser's max-age window.
+            if request.path.startswith("/assets/"):
+                resp.headers["Cache-Control"] = "no-cache"
         return resp  # type: ignore[return-value]
 
     # SPA fallback: serve index.html for client-side React Router paths.

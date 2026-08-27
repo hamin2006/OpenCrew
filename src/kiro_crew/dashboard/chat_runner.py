@@ -674,6 +674,10 @@ def _context_usage_payload(slot_key: str, client: Any) -> dict[str, Any]:
         payload["window_tokens"] = window
     else:
         payload["reset"] = True
+    if hasattr(client, "session_cost"):
+        cost = client.session_cost()
+        if cost and cost > 0:
+            payload["cost"] = round(cost, 4)
     return payload
 
 
@@ -3212,6 +3216,172 @@ async def _prefetch_ttl(state: "DashboardState", slot: "_ChatSlot", session_key:
         logger.warning("Prefetch TTL failed for slot %s", slot.key, exc_info=True)
 
 
+_GATEWAY_SLASH_COMMANDS = frozenset(
+    {
+        "/model",
+        "/usage",
+        "/context",
+        "/clear",
+        "/agent",
+        "/help",
+        "/changelog",
+        "/todos",
+        "/tools",
+        "/mcp",
+        "/logdump",
+        "/hooks",
+    }
+)
+
+
+async def _handle_gateway_slash(
+    state: "DashboardState",
+    slot: "_ChatSlot",
+    session_key: str,
+    first_word: str,
+    message: str,
+) -> tuple[bool, str | None]:
+    """Answer kiro-only slash commands from gateway state.
+
+    opencode's ACP short-circuits unknown slash commands before the
+    model, so /model, /usage, /context, /clear, /agent, /help and
+    /changelog would be silent no-ops. These reply from state the
+    gateway already tracks. /todos falls through to the model as an
+    ordinary prompt (opencode has a native todos tool).
+
+    Returns (handled, rewritten_message): handled=True means the turn
+    is done; rewritten_message (with handled=False) replaces the user
+    message so the turn continues as a normal prompt.
+    """
+    _parts = message.split(None, 1)
+    _rest = _parts[1].strip() if len(_parts) > 1 else ""
+
+    if first_word == "/todos":
+        return False, f"Use your todos tool to handle: {_rest or 'show current todos'}"
+
+    provider = state.sessions.get_provider(session_key)
+
+    if first_word == "/model":
+        # slot.model is ALWAYS the current model: the pick API resolves
+        # picker labels to opencode wire ids before storing, so no live
+        # configOptions read is needed (and the live handle's options
+        # are not reliably populated on the pooled path).
+        if getattr(slot, "model", ""):
+            body = f"🧠 Current model: `{slot.model}`\nSwitch it from the model picker in the chat header."
+        else:
+            body = "Auto (backend default) — no model picked yet. Send a message or use the model picker in the header."
+    elif first_word == "/usage":
+        if provider is None:
+            body = "No active session yet — send a message first."
+        else:
+            _cost = provider.session_cost() if hasattr(provider, "session_cost") else None
+            _cost_txt = f"${_cost:.4f}" if isinstance(_cost, (int, float)) else "n/a"
+            _pct = provider.context_usage_pct() if hasattr(provider, "context_usage_pct") else None
+            _used = (
+                provider.context_used_tokens()
+                if hasattr(provider, "context_used_tokens")
+                else None
+            )
+            _win = (
+                provider.context_window_tokens()
+                if hasattr(provider, "context_window_tokens")
+                else None
+            )
+            body = f"💰 Session spend: {_cost_txt}"
+            if isinstance(_pct, (int, float)):
+                body += f"\nContext: {_pct:.1f}%"
+                if (
+                    isinstance(_used, (int, float))
+                    and isinstance(_win, (int, float))
+                    and _win
+                ):
+                    body += f" ({int(_used):,} / {int(_win):,} tokens)"
+    elif first_word == "/context":
+        if provider is None:
+            body = "No active session yet — send a message first."
+        else:
+            _pct = provider.context_usage_pct() if hasattr(provider, "context_usage_pct") else None
+            _used = (
+                provider.context_used_tokens()
+                if hasattr(provider, "context_used_tokens")
+                else None
+            )
+            _win = (
+                provider.context_window_tokens()
+                if hasattr(provider, "context_window_tokens")
+                else None
+            )
+            if isinstance(_pct, (int, float)):
+                body = f"📊 Context: {_pct:.1f}%"
+                if (
+                    isinstance(_used, (int, float))
+                    and isinstance(_win, (int, float))
+                    and _win
+                ):
+                    body += f" ({int(_used):,} / {int(_win):,} tokens)"
+            else:
+                body = "Context usage not measured yet."
+    elif first_word == "/clear":
+        from kiro_crew.dashboard.chat_handlers import _reset_slot_session
+
+        await _reset_slot_session(state, slot, session_key)
+        body = "🧹 Session cleared — the next message starts fresh."
+    elif first_word == "/agent":
+        body = (
+            f"🤖 Agent: `{slot.agent or 'kirocrew'}`\n"
+            "(Switch agents from the selector in the chat header.)"
+        )
+    elif first_word == "/help":
+        body = (
+            "Available commands:\n"
+            "`/compact` — compact the conversation\n"
+            "`/model` — show the current model\n"
+            "`/usage` — session spend + context\n"
+            "`/context` — context usage\n"
+            "`/clear` — start a fresh session\n"
+            "`/agent` — current agent\n"
+            "`/todos` — manage the task list\n"
+            "`/changelog` — version info\n"
+            "`/goal` — goal-driven loop\n"
+            "`/prompts` — prompt library\n"
+            "`/tools` — available tools and MCP servers\n"
+            "`/mcp` — MCP server status and toggles\n"
+            "`/logdump` — tail the gateway log\n"
+            "`/hooks` — hook events and wiring status"
+        )
+    elif first_word == "/changelog":
+        from kiro_crew import __version__ as _kcrew_version
+
+        body = f"📦 Kiro Crew {_kcrew_version} (opencode backend)"
+    elif first_word == "/tools":
+        from kiro_crew.dashboard import slash_ops
+
+        body = slash_ops.handle_tools(agent=slot.agent)
+    elif first_word == "/mcp":
+        from kiro_crew.dashboard import slash_ops
+
+        body, _needs_reset = slash_ops.handle_mcp(_rest)
+        if _needs_reset:
+            from kiro_crew.dashboard.chat_handlers import _reset_slot_session
+
+            await _reset_slot_session(state, slot, session_key)
+    elif first_word == "/logdump":
+        from kiro_crew.dashboard import slash_ops
+
+        body = slash_ops.handle_logdump(_rest)
+    elif first_word == "/hooks":
+        from kiro_crew.dashboard import slash_ops
+
+        body = slash_ops.handle_hooks()
+    else:
+        return False, None
+
+    slot.append("assistant", body, "msg msg-a")
+    state.push_slots_update()
+    slot.append("done", "", "done")
+    return True, None
+
+
 async def _handle_goal_command(state: "DashboardState", slot: "_ChatSlot", message: str) -> None:
     """Handle the ``/goal`` slash command (v0 self-verdict loop).
 
@@ -3263,6 +3433,9 @@ async def _handle_goal_command(state: "DashboardState", slot: "_ChatSlot", messa
             Path(_sentinel).unlink(missing_ok=True)
             _nudge = (
                 f"Goal: {_objective}\n"
+                "Follow the `goal` skill (load it with the skill tool) for the goal "
+                "structure: measurable Definition of Done, todos tracking, one atomic "
+                "step per cycle, evidence-based completion.\n"
                 "Each idle cycle, in order: "
                 f'(1) if the file {_sentinel} exists -> autonudge_stop(reason="sentinel") and stop; '
                 "(2) if the goal is fully met by concrete evidence (a passing test, a built file, "
@@ -3930,6 +4103,20 @@ async def _run_chat(
         state.push_slots_update()
         slot.append("done", "", "done")
         return
+
+    # ── Gateway-local slash commands ──
+    # opencode's ACP short-circuits unknown slash commands before the
+    # model, so kiro-only commands would be silent no-ops; answer the
+    # useful ones from gateway state (see _handle_gateway_slash).
+    if is_slash and first_word in _GATEWAY_SLASH_COMMANDS:
+        _handled, _rewritten = await _handle_gateway_slash(
+            state, slot, session_key, first_word, message
+        )
+        if _handled:
+            return
+        if _rewritten is not None:
+            message = _rewritten
+            is_slash = False
 
     # ── /goal: arm / clear a goal-driven self-verdict loop (v0) ──
     # v0 rides AutoNudgeService unchanged: the nudge instructs the agent to

@@ -195,28 +195,24 @@ _SLASH_COMMANDS = frozenset(
         "/changelog",
         "/chat",
         "/clear",
-        "/code",
         "/compact",
         "/context",
         "/editor",
         "/exit",
-        "/experiment",
         "/goal",
         "/help",
-        "/hooks",
-        "/issue",
-        "/logdump",
-        "/mcp",
         "/model",
         "/paste",
         "/prompts",
         "/q",
         "/quit",
         "/reply",
-        "/side",
         "/tangent",
         "/todos",
         "/tools",
+        "/mcp",
+        "/logdump",
+        "/hooks",
         "/usage",
     }
 )
@@ -230,7 +226,7 @@ _SLASH_COMMANDS = frozenset(
 # once — advertising a command that only yields a warning teaches a gesture
 # that does not work.
 _BLOCKED_SLASH_COMMANDS = frozenset(
-    {"/quit", "/exit", "/q", "/chat", "/paste", "/reply", "/editor", "/tangent"}
+    {"/quit", "/exit", "/q", "/chat", "/paste", "/reply", "/editor", "/tangent", "/issue", "/experiment", "/code", "/side"}
 )
 
 # Single source of truth for slash-command descriptions surfaced by the

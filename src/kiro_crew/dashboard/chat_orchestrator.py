@@ -38,7 +38,10 @@ async def _build_stage_context(
 
     parts: list[str] = []
     if goal:
-        parts.append(f"🎯 Goal: {goal}")
+        parts.append(
+            f"🎯 Goal: {goal} — follow the `goal` skill (Definition of Done, todos, "
+            "one step per cycle, evidence-based completion)."
+        )
     parts.append("Plan Status:")
     parts.append(tracker.status_summary(stage_idx, total, titles))
 
