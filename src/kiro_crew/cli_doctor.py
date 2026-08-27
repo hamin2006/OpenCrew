@@ -20,7 +20,7 @@ from kiro_crew import __version__ as _mc_version
 from kiro_crew import diagnostics, platform_compat, sandbox
 from kiro_crew.acp import kas_assets, kas_auth
 from kiro_crew.acp.client import KIRO_CLI_BIN
-from kiro_crew.acp.types import ACP_BACKEND_KAS
+from kiro_crew.acp.types import ACP_BACKEND_KAS, is_kas_backend
 from kiro_crew.agent import AGENT_FILENAME
 from kiro_crew.atomic_write import atomic_write
 from kiro_crew.config import KiroCrewConfig
@@ -1154,11 +1154,19 @@ def _doctor(platform_boot_error: "Exception | None" = None, bundle: bool = False
 
     # ── Dependencies ──
     print("Dependencies")
-    # kiro-cli is THE agent backend for the public build. claude-agent-acp is
-    # only the dormant protocol seam (re-registered by an internal companion),
-    # so report it as optional and report kiro-cli as the backend.
-    kiro = shutil.which(KIRO_CLI_BIN)
-    if kiro:
+    # kiro-cli is the agent backend for the stock build; this fork runs the
+    # opencode (kas) backend via the KIROCREW_KAS_NODE shim. claude-agent-acp
+    # is only the dormant protocol seam, so it stays optional.
+    kiro = None if is_kas_backend() else shutil.which(KIRO_CLI_BIN)
+    if is_kas_backend():
+        node = kas_assets.find_kas_node()
+        if node:
+            print(f"  backend:     ✅ opencode (kas) — node: {node}")
+        else:
+            print("  backend:     ⚠️  opencode (kas) selected but node not found")
+            print("               Fix: set KIROCREW_KAS_NODE to the opencode shim.")
+            issues.append("opencode (kas) node not found")
+    elif kiro:
         print(f"  kiro-cli:    ✅ {kiro}")
         # Check login status — best-effort, never a hard failure
         try:
@@ -1600,7 +1608,14 @@ def _doctor(platform_boot_error: "Exception | None" = None, bundle: bool = False
 
     # ── Connectivity ──
     print("\nConnectivity")
-    if kiro:
+    if is_kas_backend():
+        node = kas_assets.find_kas_node()
+        print(
+            f"  opencode:    ✅ {node}"
+            if node
+            else "  opencode:    ⏭  node not found (set KIROCREW_KAS_NODE)"
+        )
+    elif kiro:
         kiro_result = subprocess.run(
             [KIRO_CLI_BIN, "--version"], capture_output=True, text=True, timeout=5
         )

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from aiohttp import web
 
+from kiro_crew.acp.types import is_kas_backend
 from kiro_crew.kiro_prerequisite import KiroPrerequisiteService
 
 _KIRO_NOT_READY_RESPONSE = {
@@ -39,6 +40,9 @@ _VERIFY_MAX_AGE_SECS = 30.0
 async def kiro_session_ready(service: object) -> bool:
     """Return the service's latched readiness. Fails closed on a bad service."""
 
+    if is_kas_backend():
+        # opencode backend: nothing to probe — kiro-cli is not involved.
+        return True
     if not isinstance(service, KiroPrerequisiteService):
         return False
     return await service.session_ready()
@@ -62,6 +66,8 @@ async def kiro_verified_ready(service: object) -> bool:
     routes, or several pollers firing together) into one probe.
     """
 
+    if is_kas_backend():
+        return True
     if not isinstance(service, KiroPrerequisiteService):
         return False
     return await service.verified_ready(max_age_secs=_VERIFY_MAX_AGE_SECS)
@@ -104,6 +110,10 @@ async def reject_if_kiro_unverified(request: web.Request) -> web.Response | None
     browser-opening spawn), and only these paths pay for the re-probe.
     """
 
+    if is_kas_backend():
+        # opencode backend: the gate exists for kiro-cli auth, which this
+        # install does not use — never 503 continue/regenerate/rewind here.
+        return None
     if await kiro_verified_ready(_service(request)):
         return None
     return web.json_response(_KIRO_NOT_READY_RESPONSE, status=503)

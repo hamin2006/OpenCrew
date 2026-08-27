@@ -2369,9 +2369,13 @@ async def start_dashboard(
     _wire_tunnel_shutdown(app, state)
     from kiro_crew.kiro_prerequisite import KiroPrerequisiteService
 
+    from kiro_crew.acp.types import is_kas_backend
+
     app["kiro_prerequisite_service"] = await asyncio.to_thread(
         KiroPrerequisiteService,
-        assume_ready=assume_kiro_ready,
+        # The opencode (kas) backend has no kiro-cli to probe or sign in — a
+        # ready latch skips the boot-time --version/whoami spawns entirely.
+        assume_ready=assume_kiro_ready or is_kas_backend(),
     )
     state.kiro_prerequisite_service = app["kiro_prerequisite_service"]
     # Probe Kiro readiness during boot rather than on the dashboard's first
@@ -3325,9 +3329,13 @@ async def start_api_server(
     await asyncio.to_thread(load_voice_reply_config)
     from kiro_crew.kiro_prerequisite import KiroPrerequisiteService
 
+    from kiro_crew.acp.types import is_kas_backend
+
     app["kiro_prerequisite_service"] = await asyncio.to_thread(
         KiroPrerequisiteService,
-        assume_ready=assume_kiro_ready,
+        # The opencode (kas) backend has no kiro-cli to probe or sign in — a
+        # ready latch skips the boot-time --version/whoami spawns entirely.
+        assume_ready=assume_kiro_ready or is_kas_backend(),
     )
     state.kiro_prerequisite_service = app["kiro_prerequisite_service"]
     # Probe Kiro readiness during boot rather than on the dashboard's first

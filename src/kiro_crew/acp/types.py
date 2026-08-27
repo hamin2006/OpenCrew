@@ -784,3 +784,19 @@ class AcpPromptStats:
         else:
             self.context_window_tokens = 0
             self.context_pct = 0.0
+
+
+def is_kas_backend() -> bool:
+    """True when the configured agent backend is KAS (opencode).
+
+    Readiness gates, the usage/credit pill, and the setup surfaces must not
+    probe or spawn kiro-cli when the gateway runs on the opencode backend —
+    kiro-cli is an optional backend in this fork, never a prerequisite. The
+    config import is deferred to avoid the config/loader <-> acp init cycle.
+    """
+    try:
+        from kiro_crew.config import KiroCrewConfig
+
+        return KiroCrewConfig.load().agent.acp_backend == ACP_BACKEND_KAS
+    except Exception:
+        return False

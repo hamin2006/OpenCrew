@@ -23,6 +23,7 @@ from aiohttp import web
 # keeps tests' monkeypatching of handlers.redact_* effective (late binding).
 import kiro_crew.dashboard.handlers as _h
 from kiro_crew.acp.client import _resolve_kiro_bin_for_spawn
+from kiro_crew.acp.types import is_kas_backend
 from kiro_crew.config.paths import kiro_agents_dir
 from kiro_crew.dashboard.handlers import kiro_usage_api
 from kiro_crew.dashboard.kiro_readiness import reject_if_kiro_unverified
@@ -712,6 +713,13 @@ async def _fetch_usage_bg() -> None:
     async def _refresh() -> None:
         nonlocal proc, sandbox_cleanup, kiro_bin, scrape_attempted
         global _usage_cache, _usage_cache_ts
+
+        if is_kas_backend():
+            # opencode backend: there is no kiro account or credit plan to
+            # report — publish unavailable so the credit pill hides, without
+            # spawning kiro-cli whoami/usage probes on its 30s poll.
+            _publish_usage({"available": False})
+            return
 
         kiro_bin = await _resolve_kiro_bin_for_spawn()
         if not kiro_bin:

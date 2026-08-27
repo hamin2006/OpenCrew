@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from kiro_crew import platform_compat, slack_manifest
 from kiro_crew.acp.client import KIRO_CLI_BIN
+from kiro_crew.acp.types import is_kas_backend
 from kiro_crew.cli_chat import _ensure_default_agent_in_config
 from kiro_crew.conductor_skill import generate_conductor_skill
 from kiro_crew.config import KiroCrewConfig
@@ -140,8 +141,9 @@ def _ensure_prerequisites() -> bool:
         _header()
         print(f"  ⚠️  node not found on PATH — install Node.js >= {MIN_NODE_MAJOR} from https://nodejs.org\n")
 
-    # kiro-cli is the agent backend. Note its absence so the user can install it.
-    if not shutil.which(KIRO_CLI_BIN):
+    # kiro-cli is the stock agent backend; the opencode (kas) backend needs
+    # neither kiro-cli nor its sign-in. Note absence only for kiro-cli installs.
+    if not is_kas_backend() and not shutil.which(KIRO_CLI_BIN):
         _header()
         print(
             "  ℹ️  kiro-cli not found on PATH — install it (the agent backend) "
