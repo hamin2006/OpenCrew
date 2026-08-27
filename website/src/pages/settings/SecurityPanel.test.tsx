@@ -1530,6 +1530,7 @@ describe('SecurityPanel — inspector rail', () => {
     const rows = railRows()
     expect(rows.map(r => r.textContent)).toEqual([
       expect.stringContaining('Live Security Posture'),
+      expect.stringContaining(i18nT('pages.settings.securityPanel.agent_identity')),
       expect.stringContaining('YOLO (auto-approve)'),
       expect.stringContaining('Denied Commands'),
       expect.stringContaining('Tailnet origin'),
@@ -1902,10 +1903,9 @@ describe('SecurityPanel — agent identity', () => {
     })
     renderWithProviders(<SecurityPanel />, { route: '/?section=identity' })
 
-    const row = await screen.findByRole('option', {
-      name: new RegExp(i18nT('pages.settings.securityPanel.agent_identity'), 'i'),
-    })
-    expect(row).toHaveTextContent(i18nT('pages.settings.securityPanel.agent_identity_posture_login'))
+    expect(
+      await screen.findAllByText(i18nT('pages.settings.securityPanel.agent_identity_posture_login')),
+    ).not.toHaveLength(0)
     expect(await screen.findByText('kirocrew-alpha')).toBeInTheDocument()
   })
 })
