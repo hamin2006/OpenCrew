@@ -638,6 +638,9 @@ interface ChatState {
   slotSwitchRequestId: string | null
   /** Slot the in-flight switch targets; it only installs a cursor for that one. */
   slotSwitchTarget: string | null
+  /** The activeSlot at the moment switchSlot.pending fired; used by the
+   *  rejected handler to restore the previous selection on transient failures. */
+  slotSwitchOrigin: string | null
   loadingOlder: boolean
   /** Last older-history fetch was rejected; surfaced on the top-of-transcript bar. */
   slotOlderError: boolean
@@ -860,6 +863,7 @@ const initialState: ChatState = {
   slotCursorKey: null,
   slotSwitchRequestId: null,
   slotSwitchTarget: null,
+  slotSwitchOrigin: null,
   loadingOlder: false,
   slotOlderError: false,
   lastChunkSeq: undefined,
@@ -4424,6 +4428,7 @@ const chatSlice = createSlice({
         state.slotCursorKey = null
         state.slotSwitchRequestId = action.meta?.requestId ?? null
         state.slotSwitchTarget = action.meta?.arg ?? null
+        state.slotSwitchOrigin = state.activeSlot
         // Save current slot's activity
         if (state.activeSlot) {
           state.slotActivity[state.activeSlot] = { toolLog: state.toolLog, subagents: state.subagents, activityTab: state.activityTab, activityOpen: state.activityOpen }
@@ -4473,7 +4478,7 @@ const chatSlice = createSlice({
       .addCase(switchSlot.fulfilled, (state, action) => {
         // Before the guards below, so an early return still ends this claim. Keyed
         // on requestId, which a hand-rolled dispatch may omit, so read it safely.
-        if (state.slotSwitchRequestId !== null && state.slotSwitchRequestId === action.meta?.requestId) { state.slotSwitchRequestId = null; state.slotSwitchTarget = null }
+        if (state.slotSwitchRequestId !== null && state.slotSwitchRequestId === action.meta?.requestId) { state.slotSwitchRequestId = null; state.slotSwitchTarget = null; state.slotSwitchOrigin = null }
         const { key, messages, running, hasMore, queue, nextBefore } = action.payload
         if (isUnsafeKey(key)) return
         if (state.activeSlot !== key) return  // user switched away during fetch
@@ -4615,13 +4620,40 @@ const chatSlice = createSlice({
         seedContextUsage(state, key, action.payload.context)
       })
       .addCase(switchSlot.rejected, (state, action) => {
-        if (state.slotSwitchRequestId !== null && state.slotSwitchRequestId === action.meta?.requestId) { state.slotSwitchRequestId = null; state.slotSwitchTarget = null }
+        const origin = state.slotSwitchOrigin
+        if (state.slotSwitchRequestId !== null && state.slotSwitchRequestId === action.meta?.requestId) { state.slotSwitchRequestId = null; state.slotSwitchTarget = null; state.slotSwitchOrigin = null }
         if (state.activeSlot !== action.meta.arg) return
-        state.messages = []
-        state.slotRunning = false
-        state.slotStopping = false
-        setPagingCursor(state, false, 0)
-        state.slotLoading = false
+
+        const is404 = action.payload?.status === 404
+
+        if (!is404 && origin) {
+          // Transient failure: restore the previous selection and re-hydrate its
+          // cached page so the user never sees an empty pane for a slot that
+          // could not be loaded.
+          state.activeSlot = origin
+          state.messages = state.slotMessages[safeKey(origin)] ?? []
+          // Undo history: origin is activeSlot again, so remove it from history.
+          state.slotHistory = state.slotHistory.filter(k => k !== origin)
+          // Restore the origin slot's activity state
+          const cached = state.slotActivity[origin]
+          if (cached) {
+            state.toolLog = cached.toolLog ?? []
+            state.subagents = cached.subagents ?? {}
+            state.activityTab = cached.activityTab ?? 'changes'
+            state.activityOpen = cached.activityOpen ?? false
+          }
+          // Restore paging cursor for the origin slot
+          const hasMore = state.slotPaneHasMore[safeKey(origin)] ?? false
+          setPagingCursor(state, hasMore, hasMore ? state.slotOldestIndex : 0)
+          state.slotLoading = false
+        } else {
+          // 404 (slot genuinely gone) or no origin to restore: clear as before.
+          state.messages = []
+          state.slotRunning = false
+          state.slotStopping = false
+          setPagingCursor(state, false, 0)
+          state.slotLoading = false
+        }
       })
       .addCase(refreshSlot.fulfilled, (state, action) => {
         if (!action.payload) return
