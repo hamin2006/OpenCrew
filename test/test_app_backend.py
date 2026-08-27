@@ -1472,3 +1472,96 @@ def test_devfleet_repo_env_wins_repo_discovery(monkeypatch, tmp_path):
     # adopted only because it carries the Kiro Crew checkout markers.
     monkeypatch.delenv("KIROCREW_DEVFLEET_REPO")
     assert dfmod._default_main_repo() == str(proj)
+
+
+class TestTheCacheOnlyChildCanSeeTheCacheItMustBootFrom:
+    """``policy_cache`` is bind-mount-hidden in every sandbox tier.
+
+    That is deliberate — it keeps the AGENT's own subprocesses from reading or rewriting
+    the ceiling — but an app backend in cache-only mode resolves the fleet ceiling FROM
+    that file and FAILS CLOSED without it. Without the visibility carve-out the two
+    controls contradict each other and every app backend on a centrally-governed host
+    exits at boot.
+    """
+
+    def test_the_spawn_passes_the_cache_as_a_visible_dir(self, app_env, tmp_path, monkeypatch):
+        import kiro_crew.apps.backend as bmod
+        from kiro_crew.platform import policy_distribution as pd
+
+        # A gateway whose OWN ceiling came from the central tier is the only one that
+        # flags a child cache-only, so that is the state to reproduce.
+        pd._record_installed(b'{"version": 1, "boot": {}}')
+        try:
+            seen: dict = {}
+
+            def _spy_wrap(argv, **kwargs):
+                seen["visible"] = kwargs.get("extra_visible_dirs")
+                return (list(argv), None)
+
+            monkeypatch.setattr(bmod, "wrap_argv", _spy_wrap)
+            monkeypatch.setattr(
+                bmod.subprocess, "Popen", lambda *a, **k: (_ for _ in ()).throw(OSError("stop"))
+            )
+
+            src = tmp_path / "source" / "cache-only-app"
+            src.mkdir(parents=True)
+            (src / APP_MANIFEST_FILENAME).write_text(
+                json.dumps(
+                    {
+                        "name": "cache-only-app",
+                        "version": "1.0.0",
+                        "displayName": "Cache only",
+                        "description": "policy cache visibility",
+                        "backend": {"entryPoint": "server.py", "healthCheck": "/health"},
+                    }
+                )
+            )
+            (src / "server.py").write_text("import time\ntime.sleep(30)\n")
+            install_app(src)
+
+            bmod.start_app_backend("cache-only-app")
+
+            assert seen.get("visible"), "the spawn passed no visible dirs at all"
+            assert str(pd.cache_dir()) in seen["visible"], (
+                "the policy cache is hidden from a child that fails closed without it, "
+                f"so every app backend would exit at boot (saw {seen['visible']!r})"
+            )
+        finally:
+            pd.reset_process_state()
+
+    def test_an_ungoverned_host_passes_no_visible_dirs(self, app_env, tmp_path, monkeypatch):
+        """No central ceiling means no cache-only flag and nothing to un-hide."""
+        import kiro_crew.apps.backend as bmod
+        from kiro_crew.platform import policy_distribution as pd
+
+        pd.reset_process_state()
+        seen: dict = {}
+
+        def _spy_wrap(argv, **kwargs):
+            seen["visible"] = kwargs.get("extra_visible_dirs")
+            return (list(argv), None)
+
+        monkeypatch.setattr(bmod, "wrap_argv", _spy_wrap)
+        monkeypatch.setattr(
+            bmod.subprocess, "Popen", lambda *a, **k: (_ for _ in ()).throw(OSError("stop"))
+        )
+
+        src = tmp_path / "source" / "plain-app"
+        src.mkdir(parents=True)
+        (src / APP_MANIFEST_FILENAME).write_text(
+            json.dumps(
+                {
+                    "name": "plain-app",
+                    "version": "1.0.0",
+                    "displayName": "Plain",
+                    "description": "no central policy",
+                    "backend": {"entryPoint": "server.py", "healthCheck": "/health"},
+                }
+            )
+        )
+        (src / "server.py").write_text("import time\ntime.sleep(30)\n")
+        install_app(src)
+
+        bmod.start_app_backend("plain-app")
+
+        assert seen.get("visible") == ()

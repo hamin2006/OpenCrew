@@ -39,8 +39,10 @@ import fnmatch
 import hmac
 import json
 import logging
+import math
 import os
 import re
+import urllib.parse
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import (
@@ -75,6 +77,26 @@ logger = logging.getLogger(__name__)
 # caller that knows the active edition (see ``load_security_policy``).
 _POLICY_ENV = "KIROCREW_SECURITY_POLICY"
 _POLICY_HOME_LEAF = "security_policy.json"
+
+# Duplicated from ``policy_distribution.POLICY_URL_ENV`` on purpose.  This module
+# is the trust root and must not import the fetch engine at module load — that
+# would pull urllib onto every import of the governance evaluator, and the engine
+# imports back from here.  Naming the variable is not a behaviour, so the copy has
+# nothing to drift into; ``test_governance_distribution.py`` pins them equal.
+_POLICY_DISTRIBUTION_URL_ENV = "KIROCREW_POLICY_URL"
+#: Named here only so the declared-source refusal can point at it; the engine owns it.
+_POLICY_DISTRIBUTION_HEADERS_ENV = "KIROCREW_POLICY_HEADERS"
+
+# Duplicated from ``policy_distribution.CACHE_DIR_LEAF`` for the same reason, and
+# pinned equal by the same test.  Named here because
+# ``assert_governance_paths_protected`` is a BOOT check that must not import the
+# fetch engine to know what it is asserting.
+_POLICY_CACHE_LEAF = "policy_cache"
+
+# Also duplicated from ``policy_distribution``, and pinned by the same test.  Named
+# here because the tier's ENTRY condition has to know about cache-only mode: such a
+# child is deliberately given no source, so a source-only gate would skip the tier.
+_POLICY_DISTRIBUTION_CACHE_ONLY_ENV = "KIROCREW_POLICY_CACHE_ONLY"
 
 
 def _policy_home_path() -> Path:
@@ -1347,6 +1369,260 @@ def active_update_pins() -> UpdatePins:
     return pins if isinstance(pins, UpdatePins) else UpdatePins()
 
 
+# ``distribution.on_unavailable`` dispositions.  Two values, because there are only
+# two questions: may this host run when the central ceiling cannot be established,
+# and may it run on a cache older than the fleet's staleness bound.
+UNAVAILABLE_FAIL_CLOSED = "fail_closed"  # abort boot / refuse the stale cache
+UNAVAILABLE_DEGRADE = "degrade"  # fall through to the next tier / serve stale + audit
+_UNAVAILABLE_DISPOSITIONS = frozenset({UNAVAILABLE_FAIL_CLOSED, UNAVAILABLE_DEGRADE})
+
+#: Floor on ``refresh_interval_secs``.  A central endpoint serves the whole fleet,
+#: so a typo'd `1` would turn every host into a polling loop against the admin's
+#: own control plane.  A value below this is raised to it (with a warning) rather
+#: than rejected: refusing would brick a fleet over a number that has a safe
+#: reading, which is the opposite of what a distribution channel is for.
+MIN_REFRESH_INTERVAL_SECS = 60
+
+#: Default per-request timeout when the policy names none.  Bounded because this
+#: runs on the boot path on a cold cache: an endpoint that accepts a connection
+#: and never answers must not hang startup indefinitely.
+DEFAULT_FETCH_TIMEOUT_SECS = 10.0
+
+#: Hard ceiling on a fetched document.  A hostile or misconfigured endpoint must
+#: not be able to OOM boot by answering with an unbounded body.
+MAX_POLICY_BYTES = 1 << 20  # 1 MiB
+
+
+@dataclass(frozen=True)
+class PolicyDistribution:
+    """Policy-only central-distribution pins: WHERE the ceiling itself comes from.
+
+    This is how an enterprise IT admin owns one document and has every machine in
+    the fleet follow it: the admin publishes ``security_policy.json`` to a central
+    location, and each host fetches it, caches the last-known-good copy, and
+    re-fetches on an interval so a pushed change lands without a restart or a
+    redeploy.  ``kiro_crew.platform.policy_distribution`` is the engine; this
+    dataclass is only the parsed declaration.
+
+    **Not a governed scope**, for the same reason :class:`UpdatePins` is not: every
+    archetype answers "is X permitted?", while a URL and an interval are *values
+    the core consumes*.  So it rides outside ``controls`` — no ``SCOPE_CATALOG``
+    row, no matcher, no evaluator change.
+
+    **Policy-only: rejected in a Level-2 profile** (see :func:`parse_profile`).  A
+    profile is narrow-only and there is no narrower version of pointing somewhere
+    else.  A per-app profile that could redirect where the ceiling is fetched from
+    would not be a narrowing — it would be a total replacement of the enforcement
+    document, which is the widest escalation in this model.
+
+    **Provenance is not configured here either.**  There is no
+    ``require_signature`` key: a document must not be the authority on whether it has
+    to be authentic, which is the reason ``_policy_trust_settings`` already gives for
+    keeping the flag out of ``security_policy.json`` — "an attacker rewriting the
+    policy would simply clear it".  Mandating a verified signature is
+    ``require_policy_signature`` in the operator-controlled admission policy, which is
+    on the keystone and which a fetched document cannot reach; this tier honours it
+    like every other tier.
+
+    **No credentials live here.**  ``headers`` is deliberately absent: a document
+    published to the whole fleet must not carry a per-machine secret, and this one
+    is additionally copied into a local cache and reported on by the read-only
+    policy viewer.  A request credential is per-machine configuration and comes
+    from the ``KIROCREW_POLICY_HEADERS`` environment variable instead — the same
+    channel that already carries ``KIROCREW_SECURITY_POLICY``.
+    """
+
+    #: The URL the ceiling is fetched from.  Empty = no central distribution (the
+    #: default, so an existing policy is byte-identical in behaviour).  The scheme
+    #: must be one a fetcher is registered for; the built-ins are ``https``,
+    #: ``file``, and ``http`` restricted to loopback hosts.
+    source: str = ""
+    #: Seconds between background re-fetches.  0 = fetch at boot only, which is
+    #: still centrally-managed but not "on the fly".  Raised to
+    #: :data:`MIN_REFRESH_INTERVAL_SECS` when set lower.
+    refresh_interval_secs: int = 0
+    #: Per-request timeout.  0 = :data:`DEFAULT_FETCH_TIMEOUT_SECS`.
+    timeout_secs: float = 0.0
+    #: How old the cached copy may be before it stops being an acceptable answer.
+    #: 0 = no bound (a reachable-once host keeps running forever on that copy).
+    #: A positive value is the fleet's staleness ceiling: past it, the disposition
+    #: below decides whether the host refuses to run or runs and reports.
+    max_cache_age_secs: int = 0
+    #: What to do when the central ceiling cannot be established — a cold cache and
+    #: an unreachable source, or a cache past ``max_cache_age_secs``.
+    #: :data:`UNAVAILABLE_FAIL_CLOSED` (the default) refuses; a fleet that pointed
+    #: a host at a central ceiling meant that ceiling to bind, so "we could not
+    #: tell" must not read as "run unbounded".  :data:`UNAVAILABLE_DEGRADE` falls
+    #: through to the next precedence tier instead, recording a governance
+    #: incident — for a fleet that would rather have a working host it can see is
+    #: degraded than a host that will not start.
+    on_unavailable: str = UNAVAILABLE_FAIL_CLOSED
+
+    @property
+    def enabled(self) -> bool:
+        """Is central distribution configured at all?"""
+        return bool(self.source)
+
+    def effective_timeout(self) -> float:
+        return self.timeout_secs if self.timeout_secs > 0 else DEFAULT_FETCH_TIMEOUT_SECS
+
+    def effective_refresh_interval(self) -> int:
+        """The refresh interval actually used, clamped to the polling floor."""
+        if self.refresh_interval_secs <= 0:
+            return 0
+        return max(self.refresh_interval_secs, MIN_REFRESH_INTERVAL_SECS)
+
+    def cache_too_old(self, age_secs: float) -> bool:
+        """Has a cached copy of *age_secs* exceeded the fleet's staleness bound?
+
+        A negative age (a clock that moved backwards between the write and the
+        read) reads as fresh rather than as infinitely stale: a host must not
+        refuse to boot because NTP stepped its clock.
+        """
+        if self.max_cache_age_secs <= 0:
+            return False
+        return age_secs > self.max_cache_age_secs
+
+    @staticmethod
+    def from_dict(d: Mapping[str, object]) -> "PolicyDistribution":
+        _reject_unknown_keys(
+            d,
+            {
+                "source",
+                "refresh_interval_secs",
+                "timeout_secs",
+                "max_cache_age_secs",
+                "on_unavailable",
+            },
+            "distribution",
+        )
+        raw_source = d.get("source")
+        if raw_source is not None and not isinstance(raw_source, str):
+            # `str(raw or "")` would coerce `"source": false` to "", silently
+            # DISABLING central distribution on a policy that plainly meant to
+            # configure it. Fail closed instead, exactly as ``updates`` does.
+            raise PlatformCompositionError("distribution.source must be a string")
+        source = str(raw_source or "").strip()
+        # A DECLARED source may not carry a credential, and the two shapes that do are
+        # userinfo and a query string. This block ends up in the policy cache VERBATIM --
+        # the document has to be byte-identical for its signature to verify -- and that
+        # file is readable by an app backend, which is arbitrary third-party code. So a
+        # `https://user:pass@host/p.json` or a pre-signed `?X-Amz-Signature=...` placed
+        # here would be published to every host and then handed to every app.
+        #
+        # This is the rule the module docstring already states -- the per-machine request
+        # credential travels in `KIROCREW_POLICY_HEADERS`, which "a published document must
+        # not" carry -- made enforceable rather than advisory. The ENVIRONMENT channel is
+        # deliberately unrestricted: that is where a pre-signed URL belongs, it is set by
+        # whatever provisions the host, and it never lands in the document.
+        if source:
+            parsed = urllib.parse.urlsplit(source)
+            offending = "userinfo" if (parsed.username or parsed.password) else ""
+            if not offending and parsed.query:
+                offending = "a query string"
+            if offending:
+                raise PlatformCompositionError(
+                    f"distribution.source carries {offending}, which a published policy "
+                    "must not: this document is cached verbatim and is readable by app "
+                    f"backends. Put the address in {_POLICY_DISTRIBUTION_URL_ENV} and any "
+                    f"credential in {_POLICY_DISTRIBUTION_HEADERS_ENV}, which stay "
+                    "per-machine."
+                )
+
+        numbers: dict[str, float] = {}
+        for key, allow_float in (
+            ("refresh_interval_secs", False),
+            ("timeout_secs", True),
+            ("max_cache_age_secs", False),
+        ):
+            raw = d.get(key)
+            if raw is None:
+                numbers[key] = 0.0
+                continue
+            # bool is an int subclass, and `"refresh_interval_secs": true` would
+            # otherwise parse as 1 second — a fleet-wide poll storm from a typo.
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                raise PlatformCompositionError(f"distribution.{key} must be a number")
+            # NaN and infinity parse as JSON numbers in Python's decoder, and every
+            # comparison below is FALSE for NaN — so it would slip past the range and
+            # whole-number checks and then raise an uncaught ValueError at int().
+            if not math.isfinite(raw):
+                raise PlatformCompositionError(f"distribution.{key} must be a finite number")
+            if raw < 0:
+                raise PlatformCompositionError(f"distribution.{key} must not be negative")
+            if not allow_float and raw != int(raw):
+                raise PlatformCompositionError(f"distribution.{key} must be a whole number")
+            numbers[key] = float(raw)
+
+        raw_disposition = d.get("on_unavailable")
+        if raw_disposition is None:
+            disposition = UNAVAILABLE_FAIL_CLOSED
+        elif not isinstance(raw_disposition, str):
+            raise PlatformCompositionError("distribution.on_unavailable must be a string")
+        else:
+            disposition = raw_disposition.strip()
+            if disposition not in _UNAVAILABLE_DISPOSITIONS:
+                raise PlatformCompositionError(
+                    f"distribution.on_unavailable {raw_disposition!r} must be one of "
+                    f"{sorted(_UNAVAILABLE_DISPOSITIONS)}"
+                )
+
+        if (
+            not source
+            and not os.environ.get(_POLICY_DISTRIBUTION_URL_ENV, "").strip()
+            and any(
+                (
+                    numbers["refresh_interval_secs"],
+                    numbers["timeout_secs"],
+                    numbers["max_cache_age_secs"],
+                    raw_disposition is not None,
+                )
+            )
+        ):
+            # A block that tunes a fetch it never configures is a policy whose
+            # author believed central distribution was on. Silently ignoring it is
+            # how a fleet ends up ungoverned while its policy file reads as managed.
+            #
+            # Unless the ENVIRONMENT supplies the source, which is the ordinary split:
+            # whatever provisions the host owns the address (and any credential in it),
+            # while the fleet publishes the cadence and the staleness bound in the
+            # document. Such a block is not inert at all, and refusing it here aborted
+            # boot on exactly the configuration the two-channel design intends.
+            raise PlatformCompositionError(
+                "distribution declares settings but no 'source'; central policy "
+                f"distribution would be inert (fail-closed). Set 'source', or "
+                f"{_POLICY_DISTRIBUTION_URL_ENV} if the address is per-machine."
+            )
+
+        return PolicyDistribution(
+            source=source,
+            refresh_interval_secs=int(numbers["refresh_interval_secs"]),
+            timeout_secs=numbers["timeout_secs"],
+            max_cache_age_secs=int(numbers["max_cache_age_secs"]),
+            on_unavailable=disposition,
+        )
+
+
+def active_policy_distribution() -> PolicyDistribution:
+    """The installed ceiling's distribution pins — empty when ungoverned.
+
+    The single read point so the refresher, the CLI and the policy viewer cannot
+    drift.  Returns an unconfigured value on any error, and deliberately reads the
+    INSTALLED context rather than resolving one: this is called from a background
+    refresh thread, where composing a context as a side effect of asking "where do
+    I fetch from" would be a boot-order surprise.
+    """
+    try:
+        from kiro_crew.platform.context import installed_context
+
+        ctx = installed_context()
+        pins = getattr(ctx.governance, "distribution", None) if ctx is not None else None
+    except Exception:
+        logger.debug("policy distribution pins unavailable", exc_info=True)
+        return PolicyDistribution()
+    return pins if isinstance(pins, PolicyDistribution) else PolicyDistribution()
+
+
 @dataclass(frozen=True)
 class GovernanceCeiling:
     """Level 1 — the enterprise security ceiling, frozen at boot.
@@ -1369,6 +1645,10 @@ class GovernanceCeiling:
     signature_state: str = "unchecked"
     # Policy-only update pins (outside ``controls`` — see UpdatePins).
     updates: UpdatePins = field(default_factory=UpdatePins)
+    # Policy-only central-distribution pins (outside ``controls`` — see
+    # PolicyDistribution). Where THIS document is fetched from, so an enterprise
+    # admin owns one file and the fleet follows it.
+    distribution: PolicyDistribution = field(default_factory=PolicyDistribution)
     # Optional operator-declared fallback profile (policy top-level ``fallback``).
     # When a per-surface profile FILE is unusable (unreadable, unparseable, or a
     # broken ``extends``), the loader substitutes THIS profile instead of the
@@ -1524,7 +1804,18 @@ def _parse_control(scope: str, spec: ScopeSpec, raw: object, *, is_policy: bool)
 # Structural (non-governed) keys consumed by parse_policy/parse_profile, not as
 # governed scopes.
 _STRUCTURAL_KEYS = frozenset(
-    {"version", "boot", "identity", "name", "bind", "extends", "description", "updates", "fallback"}
+    {
+        "version",
+        "boot",
+        "identity",
+        "name",
+        "bind",
+        "extends",
+        "description",
+        "updates",
+        "distribution",
+        "fallback",
+    }
 )
 
 
@@ -1751,6 +2042,9 @@ def parse_policy(
     raw_updates = data.get("updates")
     if raw_updates is not None and not isinstance(raw_updates, dict):
         raise PlatformCompositionError("security policy 'updates' must be an object")
+    raw_distribution = data.get("distribution")
+    if raw_distribution is not None and not isinstance(raw_distribution, dict):
+        raise PlatformCompositionError("security policy 'distribution' must be an object")
     # Optional operator-declared fallback profile (see GovernanceCeiling.fallback_profile).
     # Parsed as a narrow-only PROFILE (is_policy=False): resolve() intersects it with
     # this ceiling like any per-surface profile when a profile FILE is unusable, so it
@@ -1787,6 +2081,7 @@ def parse_policy(
         identity_signature=signature,
         signature_state=signature_state,
         updates=UpdatePins.from_dict(raw_updates or {}),
+        distribution=PolicyDistribution.from_dict(raw_distribution or {}),
         fallback_profile=fallback_profile,
     )
 
@@ -1815,6 +2110,18 @@ def parse_profile(data: Mapping[str, object]) -> Profile:
         raise PlatformCompositionError(
             "profiles may not set 'updates' — update pins are policy-only "
             "(a profile redirecting the update source would be privilege escalation)"
+        )
+    # ``distribution`` is POLICY-ONLY for a stronger version of the same reason,
+    # and it is in _STRUCTURAL_KEYS for the same mechanical one (so _parse_controls
+    # skips it rather than failing as an unknown scope, which would make a
+    # profile's copy silently inert). Redirecting where the CEILING is fetched from
+    # is not a narrowing at all — it replaces the whole enforcement document, so a
+    # profile that could do it would be the widest escalation in this model.
+    if "distribution" in data:
+        raise PlatformCompositionError(
+            "profiles may not set 'distribution' — central policy distribution is "
+            "policy-only (a profile redirecting where the ceiling is fetched from "
+            "would replace the enforcement document, not narrow it)"
         )
     # ``fallback`` is POLICY-ONLY for the same reason ``updates`` is. It is in
     # _STRUCTURAL_KEYS (so parse_policy's _parse_controls skips it rather than
@@ -2020,16 +2327,24 @@ def _audit_policy_signature(state: str, detail: str, path_label: str) -> None:
             operation="security_policy_signature",
             outcome=state,
             source="startup",
+            # WHICH policy and WHY both live here rather than in the log line below.
+            resources=path_label,
             error=detail,
         )
     except Exception:
         logger.debug("policy signature SEL emit unavailable", exc_info=True)
     if state == SIGNATURE_UNVERIFIED:
+        # Neither the label nor the reason is interpolated. Both carry text this process
+        # did not author — the label is whatever the caller was resolving (for the fetch
+        # tier a URL that may itself be a credential) and the reason names the issuer the
+        # DOCUMENT claimed — and the log ring is served by ``GET /api/logs``, which the
+        # agent's own browser tooling can drive. The SEL record above is on the keystone
+        # and is not reachable that way, so it is where an audit reason belongs; this line
+        # exists so the state is visible in an operator's console.
         logger.warning(
-            "security policy at %s carries an UNVERIFIED signature (%s); "
-            "treating the ceiling as unauthenticated",
-            path_label,
-            detail,
+            "the security policy carries an UNVERIFIED signature; treating the ceiling as "
+            "unauthenticated. The security_policy_signature audit record names which "
+            "policy and why."
         )
 
 
@@ -2071,11 +2386,18 @@ def load_security_policy(
     Precedence (first present wins):
 
     1. ``KIROCREW_SECURITY_POLICY`` env path — fleet hot-override, highest.
-    2. ``bundled_loader()`` — the companion-bundled resource, supplied by the
+    2. **the centrally distributed document** — fetched from ``KIROCREW_POLICY_URL``
+       or from the ``distribution.source`` a lower tier declares, served from the
+       last-known-good cache when the endpoint is unreachable.  See
+       :mod:`kiro_crew.platform.policy_distribution`.  Tier 1 stays above it so an
+       operator recovering from a bad central push has a channel that outranks the
+       thing that broke; tiers 3 and 4 sit below because they are what the fetched
+       document replaces.
+    3. ``bundled_loader()`` — the companion-bundled resource, supplied by the
        caller when the active edition is ``amazon`` (Phase 9 packages it via
        ``importlib.resources``).  The public core passes ``None`` here.
-    3. ``~/.kiro/crew/security_policy.json`` — standalone operator-authored.
-    4. None → editable secure-defaults (standalone, ungoverned ceiling).
+    4. ``~/.kiro/crew/security_policy.json`` — standalone operator-authored.
+    5. None → editable secure-defaults (standalone, ungoverned ceiling).
 
     A **present-but-unreadable / invalid** policy at the env or home path raises
     ``PlatformCompositionError`` (fail-closed to strictest), mirroring
@@ -2121,33 +2443,67 @@ def load_security_policy(
         state = _verify_policy_signature(data, source=str(path))
         return parse_policy(data, signature_state=state)
 
-    if bundled_loader is not None:
-        bundled = bundled_loader()
-        if bundled is not None:
-            # The bundled tier is NOT exempt from a fleet that opted into
-            # require_policy_signature. The plugin-admission manifest signature
-            # covers only name/publisher/version/capabilities
-            # (admission.PluginManifest.signing_payload), NOT the packaged
-            # security_policy.json bytes, so "covered by admission" did not in
-            # fact protect the resource — a tampered bundled policy would have
-            # loaded unchecked. When require is OFF this is advisory exactly like
-            # the file tiers (an unsigned bundled policy still loads), so the
-            # standalone/default and the Amazon edition (which sets no require)
-            # are unaffected; when require is ON the edition must sign its
-            # bundled policy like any other governed tier.
-            state = _verify_policy_signature(bundled, source="companion-bundled resource")
-            return parse_policy(bundled, signature_state=state)
+    bundled = bundled_loader() if bundled_loader is not None else None
 
     home_path = _policy_home_path()
+    home_data: Optional[Dict[str, object]] = None
+    home_error: Optional[Exception] = None
     if home_path.exists():
+        # Read here rather than at the home tier below because the CENTRAL tier
+        # needs to see whether a lower tier declares a ``distribution`` source.
+        # The read is captured, not acted on: an unreadable home file still raises
+        # with the same message at the same point in precedence, one tier down.
         try:
-            data = _read_json_file(home_path)
+            home_data = _read_json_file(home_path)
         except Exception as exc:
-            raise PlatformCompositionError(
-                f"security policy at {home_path} is unreadable: {exc}"
-            ) from exc
-        state = _verify_policy_signature(data, source=str(home_path))
-        return parse_policy(data, signature_state=state)
+            home_error = exc
+
+    # Tier 2 — the centrally distributed ceiling. The source comes from the env
+    # (the fleet lever) or from the ``distribution`` block a lower tier declares
+    # (self-refresh), preferring the bundled declaration over the home one so the
+    # peek follows the same precedence the tiers themselves do. Returns None when
+    # distribution is not configured, or when it is configured, could not be
+    # established, and the policy chose to degrade; raises under the fail-closed
+    # default. Fully inert — not even an import — when nothing declares a source.
+    # ``_POLICY_DISTRIBUTION_CACHE_ONLY_ENV`` is in this condition because a
+    # cache-only child (an app backend) is given NO source by design — the tier is
+    # what reads the cache the gateway wrote, so gating entry on a source would skip
+    # it and drop that child to a local or absent ceiling: exactly the looser-ceiling
+    # failure cache-only mode exists to prevent.
+    declared = _declared_distribution(bundled) or _declared_distribution(home_data)
+    if (
+        declared is not None
+        or os.environ.get(_POLICY_DISTRIBUTION_URL_ENV, "").strip()
+        or os.environ.get(_POLICY_DISTRIBUTION_CACHE_ONLY_ENV, "").strip()
+    ):
+        from kiro_crew.platform.policy_distribution import load_distributed_policy
+
+        distributed = load_distributed_policy(declared)
+        if distributed is not None:
+            return distributed
+
+    if bundled is not None:
+        # The bundled tier is NOT exempt from a fleet that opted into
+        # require_policy_signature. The plugin-admission manifest signature
+        # covers only name/publisher/version/capabilities
+        # (admission.PluginManifest.signing_payload), NOT the packaged
+        # security_policy.json bytes, so "covered by admission" did not in
+        # fact protect the resource — a tampered bundled policy would have
+        # loaded unchecked. When require is OFF this is advisory exactly like
+        # the file tiers (an unsigned bundled policy still loads), so the
+        # standalone/default and the Amazon edition (which sets no require)
+        # are unaffected; when require is ON the edition must sign its
+        # bundled policy like any other governed tier.
+        state = _verify_policy_signature(bundled, source="companion-bundled resource")
+        return parse_policy(bundled, signature_state=state)
+
+    if home_error is not None:
+        raise PlatformCompositionError(
+            f"security policy at {home_path} is unreadable: {home_error}"
+        ) from home_error
+    if home_data is not None:
+        state = _verify_policy_signature(home_data, source=str(home_path))
+        return parse_policy(home_data, signature_state=state)
 
     # No policy at env, bundled, OR home tier → ungoverned (editable defaults).
     #
@@ -2160,6 +2516,34 @@ def load_security_policy(
     # fail-closed refusal lives in :func:`assert_policy_signature_satisfied`, which
     # boot calls on the FINAL context alongside the other governance floor gates.
     return None
+
+
+def _declared_distribution(
+    data: Optional[Mapping[str, object]],
+) -> Optional[PolicyDistribution]:
+    """Peek a lower tier's ``distribution`` block, for the central tier's source.
+
+    Returns ``None`` when *data* is absent or declares no source, so the central
+    tier stays completely inert — not even imported — on every install that does
+    not use it.
+
+    Deliberately does **not** validate the rest of the document.  This is a peek at
+    one key, ahead of the tier that will parse the whole thing: a policy whose
+    OTHER keys are malformed must still fail at its own tier with its own message,
+    not here with a confusing one about distribution.  A malformed ``distribution``
+    block itself does raise, because that block is what this function exists to
+    read and a fleet that mistyped where its ceiling comes from must not silently
+    get no central distribution at all.
+    """
+    if not isinstance(data, Mapping):
+        return None
+    raw = data.get("distribution")
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise PlatformCompositionError("security policy 'distribution' must be an object")
+    declared = PolicyDistribution.from_dict(raw)
+    return declared if declared.enabled else None
 
 
 def assert_policy_signature_satisfied(ceiling: Optional[GovernanceCeiling]) -> None:
@@ -2817,6 +3201,13 @@ def assert_governance_paths_protected() -> None:
         # Denied-command opt-out ceiling — the agent must not be able to write
         # its own deny opt-out state (would let it disable the deny gate).
         ".kiro/crew/denied_commands.json",
+        # The centrally-distributed ceiling's cache. On this list for the same
+        # reason as the policy itself and then one more: the cached metadata records
+        # the source the copy came from, and the loader trusts that record when
+        # deciding whether the cache is this host's last-known-good. An agent that
+        # could write here would not need to touch ``security_policy.json`` to
+        # replace its own ceiling — it would publish itself one, with provenance.
+        f".kiro/crew/{_POLICY_CACHE_LEAF}",
     )
     sensitive = set(security._SENSITIVE_HOME_DIRS)  # noqa: SLF001 — boot integrity check
     missing = [p for p in required if p not in sensitive]
@@ -2885,6 +3276,13 @@ __all__ = [
     "BootControls",
     "UpdatePins",
     "active_update_pins",
+    "PolicyDistribution",
+    "active_policy_distribution",
+    "UNAVAILABLE_FAIL_CLOSED",
+    "UNAVAILABLE_DEGRADE",
+    "MIN_REFRESH_INTERVAL_SECS",
+    "DEFAULT_FETCH_TIMEOUT_SECS",
+    "MAX_POLICY_BYTES",
     "Profile",
     "Bind",
     "POLICY_VERSION",

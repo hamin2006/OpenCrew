@@ -555,3 +555,60 @@ class TestBothStartupSitesStash:
         for name in routes_pkg.REGISTRAR_NAMES:
             src += (routes_dir / f"{name}.py").read_text(encoding="utf-8")
         assert '"/api/tailnet/status", handlers.api_tailnet_status' in src
+
+
+# ── Revoking a materialised origin when the ceiling tightens ───────────────
+
+
+class TestRevokingAPublishedOriginWhenTheCeilingTightens:
+    """The ``capabilities.tailnet_origin`` gate fires when ``publish`` is CALLED — it is a
+    chokepoint on the action, not a condition re-checked while serving. That was sound while
+    the ceiling could only change at boot. With central distribution's live refresh it is
+    not: a fleet pinning the capability off mid-flight would otherwise leave every
+    already-published host serving its dashboard on the tailnet until someone restarted it,
+    with the policy reporting the capability as denied the whole time.
+    """
+
+    @staticmethod
+    def _run(monkeypatch, *, pinned_off: bool, published, unpublish_ok: bool = True):
+        from kiro_crew.dashboard import tailnet_serve
+
+        calls: list[int] = []
+        monkeypatch.setattr(tailnet_serve, "is_governance_pinned_off", lambda **kw: pinned_off)
+        monkeypatch.setattr(
+            tailnet_serve,
+            "serve_state",
+            lambda port: tailnet_serve.ServeState(published=published, configured=True, detail=""),
+        )
+
+        def fake_unpublish(port, *, audit_tool=""):
+            calls.append(port)
+            return tailnet_serve.ServeResult(unpublish_ok, "ok" if unpublish_ok else "cli", "")
+
+        monkeypatch.setattr(tailnet_serve, "unpublish", fake_unpublish)
+        tailnet_serve.revoke_if_governance_now_pins_off(8765)
+        return calls
+
+    def test_a_published_origin_is_withdrawn_once_the_policy_denies_it(self, monkeypatch):
+        assert self._run(monkeypatch, pinned_off=True, published=True) == [8765]
+
+    def test_nothing_is_withdrawn_while_the_policy_still_permits(self, monkeypatch):
+        assert self._run(monkeypatch, pinned_off=False, published=True) == []
+
+    @pytest.mark.parametrize("published", [False, None], ids=["not-ours", "cannot-tell"])
+    def test_a_handler_that_is_not_ours_is_never_touched(self, monkeypatch, published):
+        """``False`` is someone else's mapping — an operator may have added it by hand —
+        and ``None`` is the checked-but-never-ran case this module refuses to read as a
+        result. Neither is a mandate to remove anything."""
+        assert self._run(monkeypatch, pinned_off=True, published=published) == []
+
+    def test_a_failed_withdrawal_is_reported_and_does_not_raise(self, monkeypatch, caplog):
+        """It runs on the refresher thread: a withdrawal that fails must not stop an
+        installed ceiling being reported as installed, but it must not be silent either."""
+        import logging
+
+        with caplog.at_level(logging.ERROR, logger="kiro_crew.dashboard.tailnet_serve"):
+            assert self._run(monkeypatch, pinned_off=True, published=True, unpublish_ok=False) == [
+                8765
+            ]
+        assert any("still served" in r.getMessage() for r in caplog.records)

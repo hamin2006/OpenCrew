@@ -860,6 +860,46 @@ def _start_app_backend_body(app_name: str, manifest) -> AppProcess | None:
         _policy_val = os.environ.get(_policy_env)
         if _policy_val:
             _platform_extra[_policy_env] = os.path.abspath(os.path.expanduser(_policy_val))
+    # Imported here rather than at module scope: this module is on the app-serving
+    # import path and the policy engine pulls the governance evaluator in behind it.
+    from kiro_crew.platform.policy_distribution import (
+        POLICY_CACHE_ONLY_ENV,
+        POLICY_MAX_AGE_ENV,
+    )
+    from kiro_crew.platform.policy_distribution import cache_dir as policy_cache_dir
+    from kiro_crew.platform.policy_distribution import (
+        central_ceiling_installed,
+        effective_max_cache_age,
+    )
+
+    # The backend boots its own platform context, and minimal_env() strips the
+    # central-distribution settings — so on a fleet using that channel the child would
+    # resolve its ceiling from the on-disk or packaged default instead of the
+    # administrator's published document: the looser-ceiling failure the comment above
+    # describes, for exactly the code that most needs a ceiling.
+    #
+    # It is put in CACHE-ONLY mode rather than handed the source. An app backend is
+    # arbitrary third-party code, so giving it the fetch configuration would give it the
+    # fleet's control plane: KIROCREW_POLICY_HEADERS is a live bearer token, and a
+    # pre-signed KIROCREW_POLICY_URL is itself the credential. Neither is needed — the
+    # gateway has already written the last-known-good cache, so the cache IS the
+    # administrator's ceiling and the child adopts it with no URL, no token and no
+    # network. The staleness bound is forwarded because it is the one setting that
+    # decides whether that cached copy is still an acceptable answer.
+    # Gated on whether the gateway's OWN ceiling came from that tier, not merely on
+    # the variables being set. The child FAILS CLOSED on an absent cache, so the flag
+    # must mean "there is a fleet ceiling to inherit" — a gateway that itself degraded
+    # to a local tier has nothing to pass on, and flagging that child would refuse to
+    # start an app on a host that is running perfectly well.
+    if central_ceiling_installed():
+        _platform_extra[POLICY_CACHE_ONLY_ENV] = "1"
+        # The EFFECTIVE bound, not the env var: a fleet is just as likely to declare
+        # max_cache_age_secs in the published document, and reading only the environment
+        # would leave this child with no bound at all — accepting an arbitrarily stale
+        # ceiling on a fleet that set one.
+        _max_age = effective_max_cache_age()
+        if _max_age:
+            _platform_extra[POLICY_MAX_AGE_ENV] = str(_max_age)
     for _k, _v in os.environ.items():
         # Operator-declared trusted-binary overrides (unit-file owned):
         # backends resolve credential-bearing tools through these instead of
@@ -1014,8 +1054,35 @@ def _start_app_backend_body(app_name: str, manifest) -> AppProcess | None:
         cmd = [python_bin, entry_str]
         cwd = str(root)
 
-    # Apply OS-level sandbox to app backend process
-    sandboxed_cmd, cleanup_path = wrap_argv(cmd, mode="standard")
+    # Apply OS-level sandbox to app backend process.
+    #
+    # ``policy_cache`` is bind-mount-hidden in every tier so the AGENT's own
+    # subprocesses cannot read or rewrite the ceiling. This child is the one exception
+    # that has to see it: cache-only mode makes it resolve the fleet ceiling FROM that
+    # file and fail closed without it, so hiding it here would stop every app backend on
+    # a centrally-governed host. Reading the ceiling it is about to be bound by is not an
+    # escalation — the exposure the mask exists to prevent is the model-driven agent
+    # learning the deny patterns, and this is Kiro Crew's own spawn, not a tool call.
+    # Passed only when cache-only mode is actually on, so an ungoverned host is unchanged.
+    #
+    # READ is all it gets WHERE A SANDBOX APPLIES. ``wrap_argv`` seals this particular
+    # directory read-only rather than honouring the blanket "visible" meaning, because an
+    # app backend is arbitrary third-party code and the cache metadata records the source
+    # the next boot trusts — write access here would let an app pick the ceiling for every
+    # later boot on the host. That is enforced in ``sandbox``, not here, so this call site
+    # cannot widen it.
+    #
+    # On a host running unconfined — no sandbox backend, or ``agent.sandbox='off'`` with the
+    # ``sandbox_allow_no_isolation`` opt-in — there is no seal to apply, and this argument
+    # is inert: the child has the whole filesystem, so the cache is one of many things it
+    # can write and singling it out would neither restore the seal nor be the tightest
+    # control available. What still bounds a forged cache there is provenance rather than
+    # permissions: with ``require_policy_signature`` set in the admission policy, a document
+    # nobody trusted is refused however it got onto disk.
+    _visible: tuple[str, ...] = ()
+    if _platform_extra.get(POLICY_CACHE_ONLY_ENV):
+        _visible = (str(policy_cache_dir()),)
+    sandboxed_cmd, cleanup_path = wrap_argv(cmd, mode="standard", extra_visible_dirs=_visible)
     sandboxed_cmd = cgroup_scope_argv(sandboxed_cmd)  # cgroup DoS ceiling
 
     logger.info(
