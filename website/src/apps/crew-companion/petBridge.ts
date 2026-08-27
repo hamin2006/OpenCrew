@@ -46,6 +46,7 @@ type Preload = {
   openExternal?(url: string): void
   galleryOpen?(): void
   galleryClose?(): void
+  turnOff?(): void
 }
 
 function preload(): Preload | undefined {
@@ -873,16 +874,31 @@ export const petBridge: PetBridge = {
 
   contextMenuAction(action) {
     if (action === 'quit') {
-      // The desktop app quit its own process. Here the companion IS an app, so the
-      // equivalent is disabling it: the overlay goes, the reminders stay, and the
-      // user can bring it back from the Apps page. Quitting Kiro Crew itself would
-      // close the dashboard too, which is not what "dismiss the companion" means.
-      void fetch('/api/apps/crew-companion/disable', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}',
-      }).catch(() => {})
+      // "Turn off companion". The desktop app quit its own process; here the
+      // companion IS an app, so the equivalent is disabling it — the overlay goes,
+      // the reminders stay, and the user can bring it back from the Apps page.
+      // Disabling over HTTP is also what tells the dashboard (its Apps page updates).
+      // Then close the overlay THE INSTANT the disable succeeds, rather than letting
+      // it linger until the main process's next ~5s reconcile tick. Gate the close on
+      // success: a failed disable leaves the companion up (a silent close that then
+      // bounced back would be worse), and the error is logged, not swallowed.
+      void (async () => {
+        try {
+          const r = await fetch('/api/apps/crew-companion/disable', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+          })
+          if (r.ok) {
+            preload()?.turnOff?.()
+          } else {
+            console.error(`crew-companion: could not turn off the companion (HTTP ${r.status})`)
+          }
+        } catch (e) {
+          console.error('crew-companion: turn-off request failed', e)
+        }
+      })()
       return
     }
     if (action === 'gallery') {
