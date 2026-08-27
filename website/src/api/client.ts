@@ -346,6 +346,12 @@ export interface AgentcoreIdentityData {
   restart_required: boolean
 }
 
+/** Pending 3LO consent after the oauth_endpoints.json allowlist. */
+export interface AgentcoreConsentData {
+  pending: boolean
+  url: string | null
+}
+
 /** Writable computer-use fields sent to PUT /api/computer-use/config. */
 export interface ComputerUseConfigSave {
   enabled: boolean
@@ -3289,6 +3295,8 @@ export const api = {
     get('/api/agentcore/identity').then(j) as Promise<AgentcoreIdentityData>,
   saveAgentcoreIdentity: (body: { posture: 'none' | 'workload' | 'login' }) =>
     put('/api/agentcore/identity', body).then(j) as Promise<AgentcoreIdentityData>,
+  getAgentcoreConsent: () =>
+    get('/api/agentcore/consent').then(j) as Promise<AgentcoreConsentData>,
   getComputerUseConfig: () => get('/api/computer-use/config').then(j) as Promise<ComputerUseConfigData>,
   saveComputerUseConfig: (body: Partial<ComputerUseConfigSave>) =>
     put('/api/computer-use/config', body).then(j) as Promise<ComputerUseConfigData>,

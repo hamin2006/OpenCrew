@@ -34,6 +34,7 @@ from kiro_crew.platform.context import (
 from kiro_crew.platform.governance import agentcore_posture
 from kiro_crew.platform.governance_profiles import governance_permits
 from kiro_crew.platform.interfaces import InboundToken, SessionPrincipal
+from kiro_crew.security import allow_agentcore_consent_url
 from kiro_crew.sel import sel
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,18 @@ logger = logging.getLogger(__name__)
 # Owning-module constants (code-style): Gateway MCP name + inbound dir.
 GATEWAY_SERVER_NAME = "agentcore-gateway"
 INBOUND_DIR_NAME = "agentcore-inbound"
+
+# Unattended session-key prefixes (cron + TaskRunner). Login never attaches
+# Gateway for these; workload user/OBO needs a vaulted owner token.
+UNATTENDED_SESSION_PREFIXES = ("cron:", "taskrunner:", "taskrunner_", "task:")
+
+# Companion ``status()`` keys. Display / policy only — never token material,
+# and never written onto the sanitized Gateway spec (``_URL_ONLY_KEYS``).
+STATUS_AUTHORIZATION_URL = "authorizationUrl"
+STATUS_CREDENTIAL_KIND = "credentialKind"
+STATUS_VAULTED_OWNER = "vaultedOwnerToken"
+CREDENTIAL_KIND_M2M = "m2m"
+CREDENTIAL_KIND_USER = "user"
 
 # Spec keys that are bearer material or a place to hide it. Stripped before
 # any write to ~/.kiro/agents/kirocrew.json.
@@ -72,6 +85,109 @@ def sanitize_gateway_spec(spec: Mapping[str, Any] | None) -> dict[str, Any] | No
             continue
         out[key] = spec[key]
     return out
+
+
+def is_unattended_session(session_key: str) -> bool:
+    """True when *session_key* names cron / TaskRunner, not a human at a keyboard."""
+    return bool(session_key) and session_key.startswith(UNATTENDED_SESSION_PREFIXES)
+
+
+def _adapter_status() -> dict[str, Any]:
+    raw = safe_context_call(
+        lambda: current_context().agent_identity.status(),
+        fallback={},
+        log_message="agent_identity.status lookup failed; treating as empty",
+    )
+    return raw if isinstance(raw, dict) else {}
+
+
+def _credential_kind() -> str:
+    kind = str(_adapter_status().get(STATUS_CREDENTIAL_KIND) or "").strip().lower()
+    if kind == CREDENTIAL_KIND_M2M:
+        return CREDENTIAL_KIND_M2M
+    return CREDENTIAL_KIND_USER
+
+
+def _vaulted_owner_token() -> bool:
+    return _adapter_status().get(STATUS_VAULTED_OWNER) is True
+
+
+def _unattended_user_permitted() -> bool:
+    """M2M may run unattended; user/OBO needs a still-valid vaulted owner token."""
+    if _credential_kind() == CREDENTIAL_KIND_M2M:
+        return True
+    return _vaulted_owner_token()
+
+
+def _consent_host_path(url: str) -> str:
+    """Host+path only — never a query string (state / PKCE / code)."""
+    from urllib.parse import urlparse
+
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return ""
+    host = (parsed.hostname or "").lower()
+    path = parsed.path or ""
+    if not host:
+        return ""
+    return f"{host}{path}"
+
+
+def surface_consent_url(url: str | None) -> str | None:
+    """Return *url* when it is allowlisted; SEL grant/deny. Never token bytes.
+
+    An absent / empty URL is not a deny — there is nothing to surface.
+    A present URL that fails the allowlist is refused (SEL denied).
+    """
+    if not isinstance(url, str) or not url.strip():
+        return None
+    stripped = url.strip()
+    host_path = _consent_host_path(stripped)
+    if allow_agentcore_consent_url(stripped):
+        sel().log_api_access(
+            caller="system",
+            operation="agentcore.consent_url",
+            outcome="ok",
+            source="agentcore_gateway",
+            resources=host_path,
+        )
+        return stripped
+    sel().log_api_access(
+        caller="system",
+        operation="agentcore.consent_url",
+        outcome="denied",
+        source="agentcore_gateway",
+        resources=host_path or "unknown-host",
+    )
+    return None
+
+
+def pending_consent_url() -> str | None:
+    """Allowlisted companion ``authorizationUrl``, or ``None``.
+
+    Capability / adapter / posture must all be on (same conjunct as Gateway
+    attach). The URL is never taken from a tool argument or the model.
+    """
+    snap = consent_snapshot()
+    return snap["url"] if snap["pending"] else None
+
+
+def consent_snapshot() -> dict[str, Any]:
+    """Pending 3LO URL after the allowlist, or a refused/absent snapshot.
+
+    ``refused`` is True only when the companion published a URL that failed
+    the allowlist — the dashboard maps that to 403 ``consent_host_refused``.
+    """
+    if not _identity_on():
+        return {"pending": False, "url": None, "refused": False}
+    raw = _adapter_status().get(STATUS_AUTHORIZATION_URL)
+    if not isinstance(raw, str) or not raw.strip():
+        return {"pending": False, "url": None, "refused": False}
+    allowed = surface_consent_url(raw)
+    if allowed is None:
+        return {"pending": False, "url": None, "refused": True}
+    return {"pending": True, "url": allowed, "refused": False}
 
 
 def inbound_sidecar_path(session_key: str) -> Path:
@@ -226,6 +342,10 @@ def session_gateway_servers(session_key: str) -> list[dict[str, Any]]:
     data = read_inbound_sidecar(session_key)
     if data is None:
         return []
+    if data.get("denied") is True:
+        # Session inject outranks the same-named agent-file entry (kiro-cli).
+        # Workload user/OBO unattended retracts Gateway this way.
+        return [{"name": GATEWAY_SERVER_NAME, "disabled": True}]
     url = data.get("url")
     headers = data.get("headers")
     if not isinstance(url, str) or not url:
@@ -246,22 +366,57 @@ def _authorization_value(token: InboundToken) -> str:
     return f"{scheme} {token.token}".strip()
 
 
+def _log_unattended_denied(principal: SessionPrincipal, *, reason: str) -> None:
+    sel().log_api_access(
+        caller="system",
+        operation="agentcore.unattended_denied",
+        outcome="denied",
+        source="agentcore_gateway",
+        resources=(
+            f"session={principal.session_key} subject={principal.subject} " f"reason={reason}"
+        ),
+    )
+
+
+def _write_unattended_deny_sidecar(principal: SessionPrincipal, *, reason: str) -> None:
+    """Retract Gateway for this session without writing a token."""
+    payload: dict[str, Any] = {
+        "name": GATEWAY_SERVER_NAME,
+        "denied": True,
+        "reason": reason,
+        "session_key": principal.session_key,
+        "subject": principal.subject,
+    }
+    _write_owner_only_json(inbound_sidecar_path(principal.session_key), payload)
+    _log_unattended_denied(principal, reason=reason)
+
+
 async def attach_gateway_inbound(principal: SessionPrincipal) -> Path | None:
     """Vend a login-posture inbound token and write the session sidecar.
 
-    Workload posture clears any leftover sidecar (IAM inbound, no JWT).
+    Workload posture clears any leftover sidecar (IAM inbound, no JWT)
+    unless this is an unattended user/OBO session without a vaulted owner
+    token — then a deny sidecar retracts the agent-file Gateway.
     Login posture writes the sidecar only when vend returns a live token
-    and a URL-only spec exists. Otherwise Gateway stays absent.
+    and a URL-only spec exists. Unattended login sessions never attach.
     """
     if not _identity_on():
         clear_inbound_sidecar(principal.session_key)
         return None
     posture = _current_posture()
+    unattended = is_unattended_session(principal.session_key)
     if posture == "workload":
+        if unattended and not _unattended_user_permitted():
+            _write_unattended_deny_sidecar(principal, reason="user_without_vault")
+            return None
         clear_inbound_sidecar(principal.session_key)
         return None
     if posture != "login":
         clear_inbound_sidecar(principal.session_key)
+        return None
+    if unattended:
+        clear_inbound_sidecar(principal.session_key)
+        _log_unattended_denied(principal, reason="login_unattended")
         return None
 
     from kiro_crew.cloud import iam as cloud_iam

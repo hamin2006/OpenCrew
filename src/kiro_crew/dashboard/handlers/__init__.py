@@ -607,6 +607,7 @@ from kiro_crew.dashboard.handlers.computer_use import (  # noqa: E402, F401
 
 # This-crew AgentCore identity (Settings → Security). Browser, cookie-authed.
 from kiro_crew.dashboard.handlers.agentcore_identity import (  # noqa: E402, F401
+    api_agentcore_consent_get,
     api_agentcore_identity_get,
     api_agentcore_identity_save,
 )

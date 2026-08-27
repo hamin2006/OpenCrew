@@ -24,6 +24,8 @@ vi.mock('../../api/client', () => ({
     kirocrewConfig: vi.fn(),
     patchConfig: vi.fn(),
     tailnetStatus: vi.fn(),
+    getAgentcoreIdentity: vi.fn(),
+    getAgentcoreConsent: vi.fn(),
   },
 }))
 
@@ -81,6 +83,19 @@ describe('SecurityPanel — tailnet origin', () => {
     })
     ;(api.kirocrewConfig as ReturnType<typeof vi.fn>).mockResolvedValue({})
     ;(api.patchConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true })
+    ;(api.getAgentcoreIdentity as ReturnType<typeof vi.fn>).mockResolvedValue({
+      configured: false,
+      posture: null,
+      workload_name: '',
+      source: 'unset',
+      writable: true,
+      write_blocked: null,
+      restart_required: false,
+    })
+    ;(api.getAgentcoreConsent as ReturnType<typeof vi.fn>).mockResolvedValue({
+      pending: false,
+      url: null,
+    })
   })
 
   it('active: green state badge, the MagicDNS origin, and the three status chips', async () => {

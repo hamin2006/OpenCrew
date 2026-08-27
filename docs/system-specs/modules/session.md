@@ -335,10 +335,15 @@ and a core-derived `raw_id`, the same function binds the principal:
 4. `attach_gateway_inbound` vends a login-posture inbound token onto a
    `0600` sidecar under `<data home>/agentcore-inbound/` (filename is a
    digest of `session_key`). Workload posture clears any leftover
-   sidecar — IAM inbound, no JWT. A miss or expiry leaves Gateway
-   absent for that session. Token bytes never enter the agent file,
-   SEL, logs, or `status()`. Dashboard chat binds this **before**
-   `get_or_create` so `session/new` can inject the sidecar.
+   sidecar — IAM inbound, no JWT — except an unattended `cron:` /
+   `taskrunner:` session whose companion `status()` reports a user/OBO
+   credential without a vaulted owner token: that writes a deny sidecar
+   so `session/new` injects `{disabled: true}` and retracts the
+   agent-file Gateway. Login posture never attaches for those unattended
+   keys. A miss or expiry leaves Gateway absent for that session. Token
+   bytes never enter the agent file, SEL, logs, or `status()`. Dashboard
+   chat binds this **before** `get_or_create` so `session/new` can inject
+   the sidecar.
 
 Dashboard chat (`chat_runner._run_chat`) is the first wired caller:
 `surface="dashboard"`, `raw_id=state.owner_id` or the local OS user.

@@ -8,7 +8,7 @@ import { Badge, Btn, Input, Toggle, Checkbox } from '../../components/ui'
 import { SettingsSection, SettingsCard, SettingsToggle } from '../../components/settings'
 import Modal from '../../components/Modal'
 import InfoTip from '../../components/InfoTip'
-import { api, ApiError, type DeniedCommandsData, type DeniedCommandRule, type DeniedUserRule, type GovernancePolicyData, type GovernanceScope, type GovernanceScopeDetail, type SecurityPostureData, type TailnetStatusData, type TrustedAppsData, type AgentcoreIdentityData } from '../../api/client'
+import { api, ApiError, type DeniedCommandsData, type DeniedCommandRule, type DeniedUserRule, type GovernancePolicyData, type GovernanceScope, type GovernanceScopeDetail, type SecurityPostureData, type TailnetStatusData, type TrustedAppsData, type AgentcoreIdentityData, type AgentcoreConsentData } from '../../api/client'
 import { PostureDisclosureRow, CODE_BASE as POSTURE_CODE_BASE } from './PostureDisclosure'
 import { MobileLoginCard } from './MobileLoginCard'
 
@@ -2015,6 +2015,14 @@ function AgentIdentitySection() {
   })
   const dirty = (data?.posture ?? 'none') !== draft
   const blocked = Boolean(data && !data.writable)
+  const { data: consent, isError: consentError } = useQuery<AgentcoreConsentData>({
+    queryKey: ['agentcore-consent'],
+    queryFn: api.getAgentcoreConsent,
+    enabled: Boolean(data?.configured),
+    refetchInterval: 15_000,
+  })
+  const consentHref =
+    typeof consent?.url === 'string' && consent.url.startsWith('https://') ? consent.url : null
   return (
     <SettingsSection title={i18nT('pages.settings.securityPanel.agent_identity')}>
       <SettingsCard>
@@ -2061,6 +2069,26 @@ function AgentIdentitySection() {
               )}
               {data?.restart_required && (
                 <p className="text-[12px] text-warn">{i18nT('pages.settings.securityPanel.agent_identity_restart')}</p>
+              )}
+              {consentError && (
+                <p className="text-[12px] text-muted">{i18nT('pages.settings.securityPanel.agent_identity_consent_refused')}</p>
+              )}
+              {consent?.pending && consentHref && (
+                <div className="rounded-md border border-border bg-bg-elevated p-3 space-y-2">
+                  <p className="text-[13px] text-text">{i18nT('pages.settings.securityPanel.agent_identity_consent_title')}</p>
+                  <p className="text-[12px] text-muted leading-relaxed">
+                    {i18nT('pages.settings.securityPanel.agent_identity_consent_body')}
+                  </p>
+                  <a
+                    href={consentHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-[13px] text-accent hover:underline"
+                  >
+                    <ExternalLink className="lucide-inline" />
+                    {i18nT('pages.settings.securityPanel.agent_identity_consent_open')}
+                  </a>
+                </div>
               )}
               <div>
                 <Btn

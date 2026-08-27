@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 OP_GET = "agentcore.identity.get"
 OP_SAVE = "agentcore.identity.save"
+OP_CONSENT = "agentcore.consent.get"
 _ENV_WORKLOAD = "KIROCREW_AGENTCORE_WORKLOAD_NAME"
 _POSTURES = frozenset({"none", "workload", "login"})
 _MINIMAL_BOOT = {
@@ -215,6 +216,37 @@ async def api_agentcore_identity_get(request: web.Request) -> web.Response:
         )
     _audit(request, operation=OP_GET, outcome="success")
     return web.json_response(payload)
+
+
+async def api_agentcore_consent_get(request: web.Request) -> web.Response:
+    """GET /api/agentcore/consent — allowlisted pending 3LO URL, or absent.
+
+    Dashboard display only. The URL is never injected into the model path.
+    An unknown host is refused (403 ``consent_host_refused``) rather than
+    rendered. Capability / adapter off yields ``pending: false``.
+    """
+    from kiro_crew.platform.agentcore_gateway import consent_snapshot
+
+    snap = consent_snapshot()
+    if snap["refused"]:
+        _audit(
+            request,
+            operation=OP_CONSENT,
+            outcome="denied",
+            resources="consent_host_refused",
+        )
+        return web.json_response(
+            {
+                "error": "consent host is not on this crew's allowlist",
+                "code": "consent_host_refused",
+            },
+            status=403,
+        )
+    if snap["pending"]:
+        _audit(request, operation=OP_CONSENT, outcome="success", resources="pending")
+        return web.json_response({"pending": True, "url": snap["url"]})
+    _audit(request, operation=OP_CONSENT, outcome="success", resources="none")
+    return web.json_response({"pending": False, "url": None})
 
 
 async def api_agentcore_identity_save(request: web.Request) -> web.Response:

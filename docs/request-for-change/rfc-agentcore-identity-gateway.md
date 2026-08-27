@@ -762,6 +762,16 @@ without does not see the server; `kirocrew.json` contains no
 Consent URL allowlist + dashboard/channel prompt. Unattended jobs
 restricted to M2M or vaulted-owner tokens. SEL events land.
 
+v1 implementation: `security.allow_agentcore_consent_url` reuses
+`oauth_endpoints.json` (no second keystone). Settings → Security shows
+an allowlisted GET `/api/agentcore/consent` link; unknown hosts return
+403 `consent_host_refused`. Login never attaches Gateway for `cron:` /
+`taskrunner:` keys. Workload user/OBO without
+`status().vaultedOwnerToken` writes a deny sidecar (`disabled: true`).
+SEL `agentcore.consent_url` / `agentcore.unattended_denied` log
+host+path / session+subject only — never token bytes. Companion
+`GetWorkloadAccessToken*` remains out of tree (Phase 5 / Task 7).
+
 Exit: an unknown consent host is refused; a cron job cannot OBO as an
 arbitrary user.
 

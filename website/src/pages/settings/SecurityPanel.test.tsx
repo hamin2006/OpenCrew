@@ -44,6 +44,7 @@ vi.mock('../../api/client', () => ({
     tailnetStatus: vi.fn(),
     getAgentcoreIdentity: vi.fn(),
     saveAgentcoreIdentity: vi.fn(),
+    getAgentcoreConsent: vi.fn(),
     listTrustedApps: vi.fn(),
     trustApp: vi.fn(),
     untrustApp: vi.fn(),
@@ -136,9 +137,12 @@ const IDENTITY_UNSET = {
   restart_required: false,
 }
 
+const CONSENT_IDLE = { pending: false, url: null } as const
+
 beforeEach(() => {
   ;(api.getAgentcoreIdentity as ReturnType<typeof vi.fn>).mockResolvedValue(IDENTITY_UNSET)
   ;(api.saveAgentcoreIdentity as ReturnType<typeof vi.fn>).mockResolvedValue(IDENTITY_UNSET)
+  ;(api.getAgentcoreConsent as ReturnType<typeof vi.fn>).mockResolvedValue(CONSENT_IDLE)
 })
 
 function snapshot(overrides: Partial<DeniedCommandsData> = {}): DeniedCommandsData {
@@ -1852,6 +1856,7 @@ describe('SecurityPanel — agent identity', () => {
     ;(api.kirocrewConfig as ReturnType<typeof vi.fn>).mockResolvedValue({})
     ;(api.tailnetStatus as ReturnType<typeof vi.fn>).mockResolvedValue(TAILNET_OFF)
     ;(api.getAgentcoreIdentity as ReturnType<typeof vi.fn>).mockResolvedValue(IDENTITY_UNSET)
+    ;(api.getAgentcoreConsent as ReturnType<typeof vi.fn>).mockResolvedValue(CONSENT_IDLE)
   })
 
   it('saves a workload posture for this crew', async () => {
@@ -1907,5 +1912,25 @@ describe('SecurityPanel — agent identity', () => {
       await screen.findAllByText(i18nT('pages.settings.securityPanel.agent_identity_posture_login')),
     ).not.toHaveLength(0)
     expect(await screen.findByText('kirocrew-alpha')).toBeInTheDocument()
+  })
+
+  it('shows an allowlisted sign-in link when Gateway consent is pending', async () => {
+    ;(api.getAgentcoreIdentity as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...IDENTITY_UNSET,
+      configured: true,
+      posture: 'login',
+      source: 'policy',
+    })
+    ;(api.getAgentcoreConsent as ReturnType<typeof vi.fn>).mockResolvedValue({
+      pending: true,
+      url: 'https://github.com/login/oauth/authorize',
+    })
+    renderWithProviders(<SecurityPanel />, { route: '/?section=identity' })
+
+    const link = await screen.findByRole('link', {
+      name: i18nT('pages.settings.securityPanel.agent_identity_consent_open'),
+    })
+    expect(link).toHaveAttribute('href', 'https://github.com/login/oauth/authorize')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
   })
 })

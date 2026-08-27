@@ -472,20 +472,20 @@ local header-proxy MCP. Do not implement both.
 - Modify: `docs/system-specs/modules/security.md`
 - Test: `test/test_agentcore_consent.py`, `test/test_agentcore_unattended.py`
 
-- [ ] **Step 1: Write failing tests for unknown consent host, injected
+- [x] **Step 1: Write failing tests for unknown consent host, injected
   envelope, and cron-without-JWT.**
 
-- [ ] **Step 2: Implement allowlist + fail-closed unattended policy.**
+- [x] **Step 2: Implement allowlist + fail-closed unattended policy.**
 
   User-facing copy is cataloged. Backend errors include `code`.
   No model-visible "click this URL" injection.
 
-- [ ] **Step 3: Verify dashboard strings and the unattended path.**
+- [x] **Step 3: Verify dashboard strings and the unattended path.**
 
   `cd website && npm run test` for the new modal/copy.
   Backend: `python -m pytest test/test_agentcore_consent.py test/test_agentcore_unattended.py -n0 -q`
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.**
 
   ```
   feat: gate AgentCore 3LO consent and unattended vending

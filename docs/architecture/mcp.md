@@ -169,7 +169,14 @@ Kiro defaults. Companion extras that carry `headers` / `Authorization`
 are stripped before the agent file is written. Gateway/token work stays
 behind the three-conjunct identity probe (adapter AND capability AND
 known posture). Gateway is unpooled: each session has its own inbound
-sidecar.
+sidecar. Unattended session keys (`cron:`, `taskrunner:`) never receive a
+login-posture inbound JWT. Workload M2M may keep the agent-file Gateway;
+workload user/OBO without a vaulted owner token writes a deny sidecar so
+`session/new` injects `{name: agentcore-gateway, disabled: true}` and
+outranks the agent-file entry. 3LO consent URLs are allowlisted through
+`security.allow_agentcore_consent_url` (the same `oauth_endpoints.json`
+keystone) and surfaced only on GET `/api/agentcore/consent`, never as
+model-visible text.
 
 - `build_agent_config()` withholds the entry **and pops one arriving from the
   user override file** — a platform gate exists because there is no driver on

@@ -424,7 +424,12 @@ delegates to that same global. Wired sites:
   `attach_gateway_inbound`, which vends through
   `vend_gateway_inbound_token` onto a `0600` session sidecar.
   `acp/client.py` appends `session_gateway_servers(session_key)` onto the
-  existing `session/new` `mcpServers` list. Default adapter stays empty.
+  existing `session/new` `mcpServers` list. Unattended login never
+  attaches; unattended workload user/OBO without
+  `status().vaultedOwnerToken` injects a disabled Gateway. 3LO consent
+  is `allow_agentcore_consent_url` + GET `/api/agentcore/consent` (SEL
+  `agentcore.consent_url` / `agentcore.unattended_denied`). Default
+  adapter stays empty.
 - `slack/events.py` / `slack/handler.py` / `dashboard/handlers_system.py` —
   Slack enterprise gate + SSO status route through `slack_gate` / `identity`.
 - `mcp_gateway/manager.py` — `GatewayManager._spawn_once` resolves
