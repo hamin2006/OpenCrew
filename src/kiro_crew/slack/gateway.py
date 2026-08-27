@@ -3473,6 +3473,10 @@ class GatewayOrchestrator:
                 # cold-starts stay cheap.  Tool calls are still gated at
                 # runtime by ``_heartbeat_approval`` against
                 # ``HEARTBEAT_SAFE_TOOLS``.
+                # The kirocrew-heartbeat agent is now defined in opencode
+                # (agent/kirocrew-heartbeat.md), so the name resolves as a
+                # real mode. The read-only tool gating below
+                # (HEARTBEAT_SAFE_TOOLS) is what bounds the heartbeat.
                 client, is_new, _resumed = await self.sessions.get_or_create(
                     session_key,
                     agent="kirocrew-heartbeat",

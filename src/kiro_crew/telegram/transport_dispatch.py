@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -51,6 +52,7 @@ from kiro_crew.messaging.link import (
 )
 from kiro_crew.messaging.renderer import SilentRenderer
 from kiro_crew.messaging.transport import InboundMessage
+from kiro_crew.sandbox import create_subprocess_limited
 from kiro_crew.safety_override import describe_grant_lifetime, safety_override
 from kiro_crew.security import redact, redact_local_paths
 from kiro_crew.sel import sel
@@ -152,6 +154,30 @@ _MODEL_PICKER_MAX = 50
 #: size, and the list is the account's own model set, not a catalogue.
 _MODEL_PICKER_LIMIT = 24
 
+# opencode binary for the /model catalog fallback (dashboard /api/models parity).
+_OPENCODE_MODELS_BIN = "/home/harsh-amin/.opencode/bin/opencode"
+
+# Display names for opencode provider ids in the /model pickers.
+_OPENCODE_PROVIDER_DISPLAY = {
+    "opencode": "OpenCode",
+    "opencode-go": "OpenCode Go",
+    "deepseek": "DeepSeek",
+    "openai": "OpenAI",
+    "groq": "Groq",
+    "moonshotai": "Moonshot AI",
+    "github-copilot": "GitHub Copilot",
+}
+
+# Catalog cache TTL (seconds): /model and the two-step picker refetch
+# at most once per interval — `opencode models --verbose` costs a
+# subprocess spawn.
+_OPENCODE_MODELS_CACHE_TTL = 300
+
+# Per-provider model rows in the two-step /model picker (a single
+# provider's catalog can exceed the flat picker cap; 50 rows is still
+# a scrollable list).
+_MODEL_PROVIDER_LIMIT = 50
+
 
 @dataclass
 class _ModelPicker:
@@ -221,6 +247,10 @@ class TelegramDispatcher:
         # callback_data at 64 bytes and model ids routinely exceed that, so the
         # button carries an INDEX into this table instead of the id itself.
         self._model_pickers: dict[str, _ModelPicker] = {}
+        # Cached opencode catalog: (rows, fetched_at). The two-step
+        # /model picker resolves a provider press without re-spawning
+        # the CLI.
+        self._opencode_models_cache: tuple[list[tuple[str, str]], float] | None = None
 
     # ── Turn dispatch (transport's dispatch callback) ──────────────────────
 
@@ -945,7 +975,7 @@ class TelegramDispatcher:
 
     # ── /model (inline-button model picker) ────────────────────────────────
 
-    def _model_choices(self, session_key: str) -> tuple[tuple[str, str], ...]:
+    async def _model_choices(self, session_key: str) -> tuple[tuple[str, str], ...]:
         """``(model_id, label)`` rows to offer for this session.
 
         The ONLY source is what this session's backend advertised at
@@ -975,7 +1005,102 @@ class TelegramDispatcher:
             if not model_id or model_id == "auto":
                 continue
             rows.append((model_id, str(entry.get("name") or model_id)))
+        # opencode advertises no ``models`` payload at session/new (only
+        # configOptions), so the kiro-shaped list above is empty for it.
+        # Fall back to the same catalog the dashboard /api/models uses —
+        # ``opencode models --verbose`` — whose ids are what
+        # session/set_model accepts verbatim.
+        if len(rows) <= 1 and str(getattr(provider, "session_id", "") or "").startswith("ses_"):
+            rows = [("", "Auto (let the backend choose)")]
+            rows.extend(await self._fetch_opencode_model_rows())
+            # opencode's catalog lists providers in an order that buries
+            # everything except opencode/opencode-go under the picker cap
+            # — the session's own model can sit just past the window.
+            # Put the current model and its provider first so the picker
+            # always shows what the session is actually running.
+            cur = self._session_current_model(session_key)
+            _prov = cur.split("/", 1)[0] if cur else ""
+            if _prov:
+                rows.sort(
+                    key=lambda r: (
+                        (-1, r[0])
+                        if not r[0]
+                        else (
+                            (0, r[0])
+                            if r[0] == cur
+                            else ((1, r[0]) if r[0].split("/", 1)[0] == _prov else (2, r[0]))
+                        )
+                    )
+                )
         return tuple(rows[:_MODEL_PICKER_LIMIT])
+
+    async def _fetch_opencode_model_rows(self) -> list[tuple[str, str]]:
+        """``(model_id, label)`` rows from ``opencode models --verbose``.
+
+        One JSON object per line; ids are ``provider/model`` — the shape
+        ``session/set_model`` accepts verbatim. Best-effort: any failure
+        degrades to an empty list (the caller keeps only the Auto row).
+        """
+        import subprocess
+
+        cached = self._opencode_models_cache
+        if cached is not None and time.time() - cached[1] < _OPENCODE_MODELS_CACHE_TTL:
+            return cached[0]
+        try:
+            proc = await create_subprocess_limited(
+                _OPENCODE_MODELS_BIN,
+                "models",
+                "--verbose",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+            try:
+                stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+            except asyncio.TimeoutError:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                await proc.communicate()
+                logger.warning("telegram /model: opencode models timed out")
+                return []
+            if proc.returncode != 0 or not stdout.strip():
+                logger.warning("telegram /model: opencode models exited %s", proc.returncode)
+                return []
+            # Output is one PRETTY-PRINTED (multi-line) JSON object per
+            # model after a non-JSON header line — accumulate lines into
+            # a buffer until one parses, mirroring agents.api_models.
+            rows: list[tuple[str, str]] = []
+            buf = ""
+            for line in stdout.decode(errors="replace").splitlines():
+                if line.lstrip().startswith("{"):
+                    buf = line
+                    continue
+                if buf:
+                    buf += "\n" + line
+                    try:
+                        m = json.loads(buf)
+                    except json.JSONDecodeError:
+                        continue
+                    buf = ""
+                    if not isinstance(m, dict):
+                        continue
+                    mid = m.get("id")
+                    pid = m.get("providerID")
+                    if not isinstance(mid, str) or not isinstance(pid, str):
+                        continue
+                    rows.append(
+                        (
+                            f"{pid}/{mid}",
+                            f"{m.get('name') or mid} ({_OPENCODE_PROVIDER_DISPLAY.get(pid, pid)})",
+                        )
+                    )
+            self._opencode_models_cache = (rows, time.time())
+            return rows
+        except Exception:
+            logger.warning("telegram /model: opencode models fetch failed", exc_info=True)
+            return []
 
     def _prune_model_pickers(self, now: float) -> None:
         """Drop expired pickers, then the oldest ones past the retention cap."""
@@ -985,6 +1110,99 @@ class TelegramDispatcher:
         while len(self._model_pickers) > _MODEL_PICKER_MAX:
             oldest = min(self._model_pickers, key=lambda t: self._model_pickers[t].created_at)
             self._model_pickers.pop(oldest, None)
+
+    def _uses_opencode_catalog(self, session_key: str) -> bool:
+        """True when /model for this session should use the two-step catalog.
+
+        opencode advertises no ``models`` payload (only configOptions), so
+        the kiro-shaped available_models() list is empty for it; the
+        catalog is the only source with real ``session/set_model`` ids.
+        """
+        provider = self.sessions.get_provider(session_key)
+        if not str(getattr(provider, "session_id", "") or "").startswith("ses_"):
+            return False
+        advertised = getattr(provider, "available_models", None)
+        if not callable(advertised):
+            return True
+        try:
+            return not [m for m in advertised() if isinstance(m, dict)]
+        except Exception:  # pragma: no cover - defensive
+            return True
+
+    def _session_current_model(self, session_key: str) -> str:
+        """The session's current model id, or '' when unknown.
+
+        opencode reports it as the configOptions ``model`` currentValue;
+        kiro-cli as ``models.currentModelId`` (mirrored into
+        ``_resolved_model_id`` by the handle).
+        """
+        provider = self.sessions.get_provider(session_key)
+        client = getattr(provider, "_client", None)
+        if client is None:
+            return ""
+        for opt in getattr(client, "_config_options", None) or []:
+            if isinstance(opt, dict) and opt.get("id") == "model":
+                v = opt.get("currentValue")
+                if isinstance(v, str) and v:
+                    return v
+                break
+        return str(getattr(client, "_resolved_model_id", "") or "").strip()
+
+    async def _post_provider_picker(
+        self,
+        route: tuple[str, str],
+        chat_id: int,
+        thread: int | None,
+        session_key: str,
+    ) -> None:
+        """Step 1 of the two-step /model: post the provider keyboard.
+
+        The opencode catalog spans providers whose combined rows exceed
+        a single keyboard, so /model first asks for a provider; the
+        ``mp:`` callback then replaces this message with that provider's
+        model buttons (step 2, ``m:`` callbacks).
+        """
+        assert self.client is not None
+        catalog = await self._fetch_opencode_model_rows()
+        if not catalog:
+            await self._reply(
+                chat_id,
+                "⚠️ Model catalog unavailable — try again shortly.",
+                thread=thread,
+            )
+            return
+        counts: dict[str, int] = {}
+        for mid, _label in catalog:
+            pid = mid.split("/", 1)[0] if "/" in mid else mid
+            counts[pid] = counts.get(pid, 0) + 1
+        current = self._session_current_model(session_key)
+        rows: list[tuple[str, str]] = [("__auto__", "Auto (let the backend choose)")]
+        rows += [
+            (pid, f"{_OPENCODE_PROVIDER_DISPLAY.get(pid, pid)} ({counts[pid]})")
+            for pid in sorted(counts)
+        ]
+        keyboard = [
+            [{"text": label, "callback_data": f"mp:{pid}"}]
+            for pid, label in rows
+        ]
+        header = f"Current model: {current or 'Auto'}\nPick a provider:"
+        message_id = await self._reply(
+            chat_id,
+            header,
+            thread=thread,
+            reply_markup={"inline_keyboard": keyboard},
+        )
+        if message_id is None:
+            return
+        # Carry the route for the mp: callback (it edits this message).
+        self._model_pickers[f"{chat_id}:{message_id}"] = _ModelPicker(
+            route=route,
+            chat_id=chat_id,
+            message_id=message_id,
+            created_at=time.time(),
+            choices=(),
+        )
+        self._prune_model_pickers(time.time())
 
     async def _handle_model(self, route: tuple[str, str], chat_id: int, arg: str) -> None:
         """Post the model keyboard (or report the current pick for a bare arg).
@@ -997,7 +1215,10 @@ class TelegramDispatcher:
         assert self.client is not None
         session_key = self._session_key(route)
         thread = self._route_thread(route)
-        choices = self._model_choices(session_key)
+        if self._uses_opencode_catalog(session_key):
+            await self._post_provider_picker(route, chat_id, thread, session_key)
+            return
+        choices = await self._model_choices(session_key)
         if len(choices) <= 1:
             await self._reply(
                 chat_id,
@@ -1193,6 +1414,77 @@ class TelegramDispatcher:
                 verdict = "⌛ This approval already expired."
             await self.client.edit_message(
                 cb.chat_id, cb.message_id, verdict, reply_markup={"inline_keyboard": []}
+            )
+            return
+
+        # Provider pick (two-step /model): "mp:<provider_id>" — replace
+        # the provider keyboard with that provider's model buttons on the
+        # SAME message (the ``m:`` handler below resolves them).
+        if data.startswith("mp:"):
+            token = f"{cb.chat_id}:{cb.message_id}"
+            picker = self._model_pickers.get(token)
+            if picker is None or picker.choices:
+                # Pruned, or not a provider message (choices non-empty
+                # means a model list already sits on this message).
+                await self.client.edit_message(
+                    cb.chat_id,
+                    cb.message_id,
+                    "⌛ This provider list is no longer active — send /model again.",
+                    reply_markup={"inline_keyboard": []},
+                )
+                return
+            provider_id = data[3:]
+            if provider_id == "__auto__":
+                self._model_pickers.pop(token, None)
+                outcome = await self._apply_model(picker.route, "")
+                await self.client.edit_message(
+                    cb.chat_id, cb.message_id, outcome, reply_markup={"inline_keyboard": []}
+                )
+                return
+            catalog = await self._fetch_opencode_model_rows()
+            choices: tuple[tuple[str, str], ...] = (("", "Auto (let the backend choose)"),) + tuple(
+                (mid, label)
+                for mid, label in catalog
+                if mid.split("/", 1)[0] == provider_id
+            )[:_MODEL_PROVIDER_LIMIT]
+            if len(choices) <= 1:
+                self._model_pickers.pop(token, None)
+                await self.client.edit_message(
+                    cb.chat_id,
+                    cb.message_id,
+                    "⚠️ No models found for that provider.",
+                    reply_markup={"inline_keyboard": []},
+                )
+                return
+            # Re-register this message as a model picker with the new
+            # choices (same token — the m: handler needs no changes).
+            self._model_pickers[token] = _ModelPicker(
+                route=picker.route,
+                chat_id=cb.chat_id,
+                message_id=cb.message_id,
+                created_at=time.time(),
+                choices=choices,
+            )
+            current = self._session_current_model(self._session_key(picker.route))
+            provider_label = _OPENCODE_PROVIDER_DISPLAY.get(provider_id, provider_id)
+            header = (
+                f"Current model: {current or 'Auto'}\n"
+                f"Provider: {provider_label} — pick one:"
+            )
+            keyboard = [
+                [
+                    {
+                        "text": f"{'• ' if mid == current else ''}{label}",
+                        "callback_data": f"m:{index}",
+                    }
+                ]
+                for index, (mid, label) in enumerate(choices)
+            ]
+            await self.client.edit_message(
+                cb.chat_id,
+                cb.message_id,
+                header,
+                reply_markup={"inline_keyboard": keyboard},
             )
             return
 
