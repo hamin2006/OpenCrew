@@ -188,10 +188,10 @@ async def bind_session_principal(
     """
     principal = derive_session_principal(surface=surface, raw_id=raw_id, session_key=session_key)
     annotated = await apply_principal_annotation(principal)
-    setter = getattr(sessions, "set_principal", None)
-    if callable(setter):
-        setter(session_key, annotated)
     try:
+        setter = getattr(sessions, "set_principal", None)
+        if callable(setter):
+            setter(session_key, annotated)
         from kiro_crew.platform.agentcore_gateway import (
             attach_gateway_inbound,
             drain_expired_gateway_transport,
@@ -204,6 +204,24 @@ async def bind_session_principal(
     except PlatformCompositionError:
         raise
     except Exception:
+        # Workload posture can already have URL-only Gateway in the agent
+        # file. An unattended attach miss must retract that entry; a human
+        # dashboard turn does not fail solely because attach raised (login
+        # miss is already fail-closed: no sidecar → no inject).
+        from kiro_crew.platform.agentcore_gateway import (
+            _write_unattended_deny_sidecar,
+            is_unattended_session,
+        )
+
+        if is_unattended_session(session_key):
+            try:
+                _write_unattended_deny_sidecar(annotated, reason="attach_failed")
+            except Exception:
+                logger.debug(
+                    "unattended deny sidecar write failed for %s",
+                    session_key,
+                    exc_info=True,
+                )
         logger.debug(
             "attach_gateway_inbound failed; Gateway stays absent for %s",
             session_key,

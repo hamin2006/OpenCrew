@@ -339,8 +339,12 @@ and a core-derived `raw_id`, the same function binds the principal:
    `taskrunner:` session whose companion `status()` reports a user/OBO
    credential without a vaulted owner token: that writes a deny sidecar
    so `session/new` injects `{disabled: true}` and retracts the
-   agent-file Gateway. Login posture never attaches for those unattended
-   keys. A miss or expiry leaves Gateway absent for that session. An
+   agent-file Gateway. A bind/attach exception on those unattended keys
+   writes the same deny sidecar (`reason=attach_failed`) rather than
+   leaving the agent-file Gateway reachable. Login posture never
+   attaches for those unattended keys. A miss or expiry leaves Gateway
+   absent for that session. A human dashboard turn does not fail solely
+   because attach raised. An
    expired sidecar also recycles the live ACP child via
    `SessionManager.remove` (map preserved) before a new sidecar is
    written, so `session/new` cannot keep presenting a dead JWT. Token

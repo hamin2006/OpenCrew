@@ -489,3 +489,32 @@ def test_expired_drain_sel_has_no_token(caplog: pytest.LogCaptureFixture) -> Non
     ]
     assert expired_rows, f"expected expired inbound SEL row in {events!r}"
     assert expired_rows[0].get("outcome") == "denied"
+
+
+@pytest.mark.parametrize("prefix", [".kiro/crew", ".kirocrew"])
+def test_inbound_dir_is_keystone_under_every_home_prefix(prefix: str) -> None:
+    from kiro_crew.platform.agentcore_gateway import INBOUND_DIR_NAME
+    from kiro_crew.security import (
+        _CREW_SECRET_LEAVES,
+        is_sensitive_bash_command,
+        is_sensitive_path,
+        is_sensitive_write_path,
+    )
+
+    assert INBOUND_DIR_NAME in _CREW_SECRET_LEAVES
+    directory = f"~/{prefix}/{INBOUND_DIR_NAME}"
+    sidecar = f"{directory}/deadbeef.json"
+    assert is_sensitive_path(directory) is True
+    assert is_sensitive_path(sidecar) is True
+    assert is_sensitive_write_path(directory) is True
+    assert is_sensitive_write_path(sidecar) is True
+    for cmd in (
+        f"cat {directory}",
+        f"cat {sidecar}",
+        f"echo x > {sidecar}",
+        f"tee {sidecar}",
+        f"cp evil {sidecar}",
+        f"tar -xf evil.tar -C {directory}",
+        f"unzip -d {directory} evil.zip",
+    ):
+        assert is_sensitive_bash_command(cmd) is not None, cmd

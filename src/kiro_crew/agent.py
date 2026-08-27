@@ -998,7 +998,9 @@ def _record_login_invoke_probe() -> None:
     Rebuild does not emit a Gateway spec under ``login`` (inbound attach
     does that per session). A successful probe is still a posture mismatch
     and is recorded to SEL so attach fails closed on the same signal. The
-    probe is mockable; this never calls AWS.
+    public probe defaults False (no mismatch detected, not "IAM inbound
+    is impossible"); a companion must override the live check. This never
+    calls AWS.
     """
     from kiro_crew.cloud import iam as cloud_iam
 

@@ -211,3 +211,64 @@ async def test_taskrunner_prefix_is_unattended() -> None:
     )
     await attach_gateway_inbound(principal)
     assert session_gateway_servers("taskrunner:run1") == []
+
+
+class _Sessions:
+    def set_principal(self, key: str, principal: SessionPrincipal) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_unattended_bind_attach_error_writes_deny_sidecar(monkeypatch) -> None:
+    from kiro_crew.platform.agent_identity import bind_session_principal
+    from kiro_crew.platform.agentcore_gateway import (
+        GATEWAY_SERVER_NAME,
+        inbound_sidecar_path,
+        session_gateway_servers,
+    )
+    from kiro_crew.sel import sel
+
+    _install(posture="workload", kind="user", vaulted=False)
+
+    async def _boom(*_a: object, **_k: object) -> None:
+        raise RuntimeError("attach exploded")
+
+    monkeypatch.setattr(
+        "kiro_crew.platform.agentcore_gateway.attach_gateway_inbound",
+        _boom,
+    )
+    await bind_session_principal(
+        _Sessions(), surface="cron", raw_id="owner", session_key="cron:job1"
+    )
+    sidecar = json.loads(inbound_sidecar_path("cron:job1").read_text(encoding="utf-8"))
+    assert sidecar["denied"] is True
+    assert sidecar.get("reason") == "attach_failed"
+    assert _TOKEN not in json.dumps(sidecar)
+    injected = session_gateway_servers("cron:job1")
+    assert injected == [{"name": GATEWAY_SERVER_NAME, "disabled": True}]
+    events = [
+        e for e in sel().recent(limit=50) if e.get("operation") == "agentcore.unattended_denied"
+    ]
+    assert events
+    assert events[0].get("outcome") == "denied"
+    assert _TOKEN not in json.dumps(events)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_bind_attach_error_does_not_write_deny_sidecar(monkeypatch) -> None:
+    from kiro_crew.platform.agent_identity import bind_session_principal
+    from kiro_crew.platform.agentcore_gateway import inbound_sidecar_path
+
+    _install(posture="workload", kind="user", vaulted=False)
+
+    async def _boom(*_a: object, **_k: object) -> None:
+        raise RuntimeError("attach exploded")
+
+    monkeypatch.setattr(
+        "kiro_crew.platform.agentcore_gateway.attach_gateway_inbound",
+        _boom,
+    )
+    await bind_session_principal(
+        _Sessions(), surface="dashboard", raw_id="alice", session_key="dashboard:1"
+    )
+    assert inbound_sidecar_path("dashboard:1").exists() is False

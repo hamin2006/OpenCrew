@@ -493,6 +493,8 @@ async def attach_gateway_inbound(principal: SessionPrincipal) -> Path | None:
 
     from kiro_crew.cloud import iam as cloud_iam
 
+    # Public probe defaults False: "no mismatch detected", not "IAM inbound
+    # is impossible". A companion must override the live check.
     if cloud_iam.probe_instance_invoke_gateway():
         sel().log_api_access(
             caller="system",

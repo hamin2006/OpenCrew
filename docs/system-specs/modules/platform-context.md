@@ -427,12 +427,16 @@ delegates to that same global. Wired sites:
   existing `session/new` `mcpServers` list. An expired inbound sidecar
   drains that session's ACP child (`SessionManager.remove`, map
   preserved) before re-attach — Gateway is unpooled, so this does not
-  blue-green the mcp_gateway pool. Unattended login never
+  blue-green the mcp_gateway pool.   Unattended login never
   attaches; unattended workload user/OBO without
-  `status().vaultedOwnerToken` injects a disabled Gateway. 3LO consent
-  is `allow_agentcore_consent_url` + GET `/api/agentcore/consent` (SEL
-  `agentcore.consent_url` / `agentcore.unattended_denied`). Default
-  adapter stays empty.
+  `status().vaultedOwnerToken` injects a disabled Gateway. A bind/attach
+  error on those unattended keys writes the same deny sidecar. 3LO
+  consent is `allow_agentcore_consent_url` + owner-only GET
+  `/api/agentcore/consent` (SEL `agentcore.consent_url` /
+  `agentcore.unattended_denied`). Default adapter stays empty. The
+  public `probe_instance_invoke_gateway()` is a no-op False; a companion
+  must override it — False is "no mismatch detected", not "IAM inbound
+  is impossible."
 - `slack/events.py` / `slack/handler.py` / `dashboard/handlers_system.py` —
   Slack enterprise gate + SSO status route through `slack_gate` / `identity`.
 - `mcp_gateway/manager.py` — `GatewayManager._spawn_once` resolves

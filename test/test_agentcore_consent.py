@@ -17,11 +17,28 @@ _TOKENISH = "sltok-must-never-appear"
 
 
 class _Req:
-    def __init__(self) -> None:
-        self._store: dict[str, Any] = {"user": "dashboard"}
+    """Owner-shaped dashboard request unless *app* / *user* are overridden."""
+
+    def __init__(
+        self,
+        *,
+        app: str | None = "",
+        user: str = "owner-1",
+        owner: str = "owner-1",
+    ) -> None:
+        self._store: dict[str, Any] = {"user": user}
+        if app is not None:
+            self._store["app"] = app
+        self.app = {"state": type("S", (), {"owner_id": owner})()}
 
     def get(self, key: str, default: Any = None) -> Any:
         return self._store.get(key, default)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._store
+
+    def __getitem__(self, key: str) -> Any:
+        return self._store[key]
 
 
 class _ConsentIdentity(DefaultAgentIdentityProvider):
@@ -143,3 +160,54 @@ def test_consent_get_allowlisted_url(monkeypatch) -> None:
     body = json.loads(resp.text)
     assert body["pending"] is True
     assert body["url"] == _BUILTIN
+
+
+def _consent_pending(monkeypatch, url: str = _BUILTIN) -> None:
+    from kiro_crew.config import KiroCrewConfig
+    from kiro_crew.platform.bootstrap import build_default_context
+    from kiro_crew.platform.context import set_context
+    from kiro_crew.platform.governance import parse_policy
+    import dataclasses
+
+    base = build_default_context(KiroCrewConfig())
+    ceiling = parse_policy(
+        {
+            "version": 1,
+            "boot": {"fail_closed": True},
+            "capabilities": {"agentcore": {"enabled": True, "posture": "login"}},
+        }
+    )
+    set_context(
+        dataclasses.replace(
+            base,
+            agent_identity=_ConsentIdentity(url),
+            governance=ceiling,
+        )
+    )
+    monkeypatch.setattr(identity_mod, "_audit", lambda *a, **k: None)
+
+
+def test_consent_get_app_token_is_403(monkeypatch) -> None:
+    _consent_pending(monkeypatch)
+    resp = asyncio.run(identity_mod.api_agentcore_consent_get(_Req(app="board")))
+    assert resp.status == 403
+    body = json.loads(resp.text)
+    assert body["code"] == "dashboard_owner_required"
+    assert "url" not in body
+
+
+def test_consent_get_non_owner_is_403(monkeypatch) -> None:
+    _consent_pending(monkeypatch)
+    resp = asyncio.run(identity_mod.api_agentcore_consent_get(_Req(user="other")))
+    assert resp.status == 403
+    body = json.loads(resp.text)
+    assert body["code"] == "dashboard_owner_required"
+    assert "url" not in body
+
+
+def test_consent_get_missing_app_claim_is_403(monkeypatch) -> None:
+    _consent_pending(monkeypatch)
+    resp = asyncio.run(identity_mod.api_agentcore_consent_get(_Req(app=None)))
+    assert resp.status == 403
+    body = json.loads(resp.text)
+    assert body["code"] == "dashboard_owner_required"

@@ -298,9 +298,10 @@ def agentcore_boundary_policy_json(account: str = "*", posture: str = "workload"
 def probe_instance_invoke_gateway() -> bool:
     """Whether the instance role can IAM-invoke Gateway.
 
-    The public core never calls AWS. Default is False (unknown / fail closed).
-    Tests and a companion mock this; a successful probe under posture ``login``
-    is a posture mismatch and withholds the Gateway spec.
+    Public core is a no-op: always False, never boto3. A companion must
+    override this. False means "no mismatch detected", not "IAM inbound
+    is impossible" — login-posture withhold only fires when this returns
+    True.
     """
     return False
 

@@ -221,11 +221,32 @@ async def api_agentcore_identity_get(request: web.Request) -> web.Response:
 async def api_agentcore_consent_get(request: web.Request) -> web.Response:
     """GET /api/agentcore/consent — allowlisted pending 3LO URL, or absent.
 
-    Dashboard display only. The URL is never injected into the model path.
-    An unknown host is refused (403 ``consent_host_refused``) rather than
-    rendered. Capability / adapter off yields ``pending: false``.
+    Owner dashboard cookie only — same gate as AWS consent. App tokens and
+    allow-listed messaging users are refused: the URL is a live 3LO start
+    and names the operator's IdP. An unknown host is refused (403
+    ``consent_host_refused``) rather than rendered. Capability / adapter
+    off yields ``pending: false``.
     """
+    from kiro_crew.dashboard.handlers.source_providers import (
+        is_owner_dashboard_request,
+        stale_owner_session_response,
+    )
     from kiro_crew.platform.agentcore_gateway import consent_snapshot
+
+    if not is_owner_dashboard_request(request):
+        _audit(
+            request,
+            operation=OP_CONSENT,
+            outcome="denied",
+            error="non_owner",
+        )
+        stale = stale_owner_session_response(request)
+        if stale is not None:
+            return stale
+        return web.json_response(
+            {"error": "dashboard owner required", "code": "dashboard_owner_required"},
+            status=403,
+        )
 
     snap = consent_snapshot()
     if snap["refused"]:

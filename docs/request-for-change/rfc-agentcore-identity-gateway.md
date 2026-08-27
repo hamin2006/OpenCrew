@@ -853,7 +853,10 @@ should present identity, not become a token broker.
 
 This is no longer a fallback: it **is** the deployed-box posture.
 IAM inbound lets a `kirocrew cloud launch` instance invoke Gateway
-at boot with no login. It drops user `sub`, so OBO and per-user
+at boot with no login. The public-core `probe_instance_invoke_gateway()`
+is a no-op that returns False; a companion must override it.
+Fail-closed there means no mismatch was detected, not that IAM inbound
+is impossible. It drops user `sub`, so OBO and per-user
 vault binding are unavailable on that path — cron is M2M-only, and
 the instance Policy.json **Denies** `ForJWT`. Interactive
 per-user vending is the other posture (`login` / CUSTOM_JWT),

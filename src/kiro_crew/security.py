@@ -5010,6 +5010,16 @@ _CREW_SECRET_LEAVES: list[str] = [
     # directly, not through this gate; the operator hand-edits it out-of-band
     # (there is deliberately no dashboard writer).
     "oauth_endpoints.json",
+    # Per-session AgentCore Gateway inbound JWTs
+    # (``platform/agentcore_gateway.py`` ``INBOUND_DIR_NAME``). Owner-only
+    # ``0600`` does not isolate another process running as the same UID, and a
+    # prompt-injected agent's ``fs_read`` is exactly that process, so the
+    # directory belongs behind the shared floor like every other credential
+    # store. Classified as the whole DIRECTORY so atomic-write temps and every
+    # sidecar file are covered. The gateway's own writer
+    # (``attach_gateway_inbound``) opens the path directly rather than through
+    # this gate.
+    "agentcore-inbound",
     # Which checkout the gateway executes (Dev Fleet "Make live"). The pointer is
     # resolved during startup and exec'd into, so a writable one is arbitrary
     # code execution in the gateway's own identity — the agent must not be able
