@@ -9,6 +9,30 @@ import { isSubagentCompletionMessage } from './subagentCompletion'
 export const GROUPABLE = new Set(['permission'])
 
 /**
+ * A content-bearing reasoning message: role `thinking` with real text (empty
+ * placeholders render nothing and never count).
+ *
+ * This is THE single definition of the condition, shared by all three sites
+ * that classify reasoning content: the wrap gate below (`contentThinkingCount`
+ * via `isReasoningBurst`, which decides when a batch is routed into a
+ * {kind:'turn'} wrapper), the per-turn fold that gate feeds
+ * (`mergeTurnThinking` in TurnBlock.tsx, which folds a turn's bursts into one
+ * hoisted row), and ChatPage's `renderMessage` (which renders a content-bearing
+ * `thinking` message as a ThinkingBlock and an empty placeholder as nothing).
+ * These sites used to keep hand-written copies of the same condition; any
+ * future refinement (a new reasoning role, a whitespace guard, a meta flag)
+ * must happen HERE so the wrap threshold, the fold, and the row renderer can
+ * never drift apart — that drift is exactly how the duplicate
+ * "Thought process" rows of #6376 would regrow.
+ */
+export const hasReasoningContent = (msg: ChatMessage): boolean =>
+  msg.role === 'thinking' && !!msg.content
+
+/** Item-level form of {@link hasReasoningContent} for TurnItem scans. */
+export const isReasoningBurst = (t: TurnItem): t is Extract<TurnItem, { kind: 'single' }> =>
+  t.kind === 'single' && hasReasoningContent(t.msg)
+
+/**
  * Roles that OPEN a turn, and are therefore the rows a reader can be anchored to.
  *
  * `nudge` and `subagent` are machine-injected but they ARE the thing that started
@@ -100,7 +124,7 @@ export function groupDisplayItems(messages: ChatMessage[]): GroupedTurns {
   // a separate predicate. Empty placeholder bursts do not count (they render
   // nothing, and mergeTurnThinking ignores them too).
   const contentThinkingCount = (items: TurnItem[]) =>
-    items.reduce((n, t) => n + (t.kind === 'single' && t.msg.role === 'thinking' && t.msg.content ? 1 : 0), 0)
+    items.reduce((n, t) => n + (isReasoningBurst(t) ? 1 : 0), 0)
   const flushTurn = (items: TurnItem[], complete: boolean) => {
     if ((hasWorkingSteps(items) && items.length > 2) || contentThinkingCount(items) >= 2) {
       turns.push({ kind: 'turn', items, complete })
