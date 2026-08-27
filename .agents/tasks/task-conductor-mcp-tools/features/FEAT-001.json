@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Convert accept_eval.py and ledger_entry.py from CLI scripts into MCP tools on the kirocrew-dashboard server, add them to the conductor's grant list, update the conductor's SKILL.md to remove the approval-cost note about per-cycle blocking, and update the conductor system prompt and spec to remove execute_bash dependency.",
+  "status": "completed",
+  "steps": [
+    "Step 1: Add two new MCP tool definitions to `_tool_definitions()` in `src/kiro_crew/mcp_dashboard.py`. The tools are: (a) `conductor_accept_eval` - wraps accept_eval.py's logic, taking an `items` array as input and returning the results JSON. (b) `conductor_ledger_entry` - wraps ledger_entry.py's logic, taking a `mode` (encode|decode|validate|rotate) and `payload` as input, returning the operation result. Follow the existing pattern: add tool dict entries with name, description, and inputSchema.",
+    "Step 2: Add handler logic for `conductor_accept_eval` and `conductor_ledger_entry` in the `_call_tool_inner()` function in `src/kiro_crew/mcp_dashboard.py`. Import and call the underlying logic from the scripts (their main logic functions: `main()` for accept_eval needs to be refactored into a callable, and `_MODES` dict for ledger_entry is already callable). The handler for accept_eval should call `_evaluate()` on each item and build the results list. The handler for ledger_entry should dispatch to the appropriate mode function (`mode_encode`, `mode_decode`, `mode_validate`, `mode_rotate`) based on the `mode` argument.",
+    "Step 3: Add validation schemas for the two new tools to `MCP_DASHBOARD_SCHEMAS` in `src/kiro_crew/validation.py`. Define `CONDUCTOR_ACCEPT_EVAL_SCHEMA` and `CONDUCTOR_LEDGER_ENTRY_SCHEMA` ToolSchema objects and register them in the dict.",
+    "Step 4: Add `@kirocrew-dashboard/conductor_accept_eval` and `@kirocrew-dashboard/conductor_ledger_entry` to the `_CONDUCTOR_DASHBOARD_GRANTS` tuple in `src/kiro_crew/agent.py`. These satisfy the grant invariant: accept_eval reads and computes (no mutation of user-visible state), ledger_entry creates/encodes a new entry value (append-only).",
+    "Step 5: Remove `execute_bash` from the conductor's `tools` list in `_install_conductor_agent()` in `src/kiro_crew/agent.py`, since it is no longer needed for the bundled scripts. Update the `_CONDUCTOR_SYSTEM_PROMPT` to reference the new MCP tools instead of shell scripts.",
+    "Step 6: Update `src/kiro_crew/builtin_skills/goal-conductor/SKILL.md` to: (a) Remove the approval-cost note about `each patrol cycle blocks on one approval for the accept_eval.py invocation`. (b) Replace references to running scripts via execute_bash with calling the MCP tools directly (conductor_accept_eval and conductor_ledger_entry). (c) Remove the 'Shell exists for the bundled scripts' paragraph. (d) Update 'Known limits' section to reflect that the per-cycle approval stall is resolved.",
+    "Step 7: Update test files to reflect the changes: (a) In `test/test_mcp_dashboard_registration.py`, update `TestWhatThisSetGrants` to include the two new tools in the expected tool sets and update the assertion about tool name prefixes (since `conductor_` is neither `chat_folder_` nor `session_`). (b) In `test/test_conductor_agent.py`, update `test_no_write_tool_and_shell_not_preapproved` to reflect that execute_bash is no longer mounted, update `test_only_create_and_read_verbs_are_auto_approved` and `test_no_dashboard_verb_is_granted_outside_the_named_set` to include the new granted verbs, and update `test_skill_states_the_real_approval_cost` to reflect the resolved stall. (c) Add a new test that calls the MCP tool handlers directly to confirm they produce correct results (following the pattern of existing handler tests)."
+  ],
+  "acceptance_criteria": [
+    "The two new tools (conductor_accept_eval, conductor_ledger_entry) appear in _tool_definitions() output",
+    "Calling conductor_accept_eval with a pr_checks item returns a well-formed results JSON",
+    "Calling conductor_ledger_entry with mode=encode and valid fields returns {ok: true, value: ...}",
+    "Both new tools appear in _CONDUCTOR_DASHBOARD_GRANTS",
+    "execute_bash is removed from the conductor agent's tools list",
+    "The conductor's SKILL.md no longer mentions per-cycle approval blocking",
+    "All existing tests in test_conductor_agent.py, test_conductor_ledger_entry.py, and test_mcp_dashboard_registration.py pass (with appropriate updates)",
+    "The grant invariant is maintained: both new tools satisfy CREATE-or-READ, never MUTATE"
+  ],
+  "verification": [
+    "Run `cd /projects/sandbox/KiroCrew && python -c \"from kiro_crew.mcp_dashboard import _tool_definitions; names = [t['name'] for t in _tool_definitions()]; assert 'conductor_accept_eval' in names; assert 'conductor_ledger_entry' in names; print('OK')\"` to confirm new tools are advertised",
+    "Run `cd /projects/sandbox/KiroCrew && python -c \"from kiro_crew.agent import _CONDUCTOR_DASHBOARD_GRANTS; assert '@kirocrew-dashboard/conductor_accept_eval' in _CONDUCTOR_DASHBOARD_GRANTS; assert '@kirocrew-dashboard/conductor_ledger_entry' in _CONDUCTOR_DASHBOARD_GRANTS; print('OK')\"` to confirm grants",
+    "Run targeted tests: `.venv/bin/pytest test/test_conductor_agent.py test/test_conductor_ledger_entry.py test/test_mcp_dashboard_registration.py -x -q`"
+  ],
+  "blocked_reason": null,
+  "findings": "Environment is INTEGRATIONS_ONLY with no pip access. Verified via: (1) AST parsing of all modified Python files, (2) direct function-level testing of conductor_scripts bridge module (evaluate_item and ledger_mode), (3) import-level verification of _CONDUCTOR_DASHBOARD_GRANTS and validation schemas, (4) assertion-level checks matching all test file expectations against actual file content. Cannot run full pytest suite due to missing hypothesis/croniter dependencies in the sandbox. The conductor_scripts.py bridge module uses importlib lazy-loading (same pattern as test/skill_script_helpers.py) to load the scripts without bytecode residue. Review follow-up (2025-01-15-120000-review.md): Issue #3 fixed - added try/except around ledger_mode call in _call_tool_inner matching the accept_eval handler pattern. Issue #2 fixed - added test/test_conductor_mcp_tools.py with 16 handler-level tests (all pass). Issue #1 (subprocess in MCP server) is architectural and acknowledged, no code change needed."
+}
