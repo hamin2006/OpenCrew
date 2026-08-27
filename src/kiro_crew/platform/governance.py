@@ -1047,6 +1047,13 @@ SCOPE_CATALOG: Dict[str, ScopeSpec] = {
     "capabilities.script_hooks": ScopeSpec(CAPABILITY, capability_default=False),
     "capabilities.cron": ScopeSpec(CAPABILITY, capability_default=False),
     "capabilities.messaging": ScopeSpec(CAPABILITY, capability_default=False),
+    # Agent workload identity + Gateway MCP (opt-in, like messaging/publish).
+    # Inner ``posture`` is policy data (``workload`` | ``login``), not a second
+    # scope and not an evaluator input. An ``enabled: true`` document with a
+    # missing or unknown posture fails closed — treated as disabled, or
+    # boot-abort when ``boot.fail_closed``. Data row only; CONTRACT_VERSION
+    # and the evaluator are untouched.
+    "capabilities.agentcore": ScopeSpec(CAPABILITY, capability_default=False),
     # Publishing an artifact's bytes to an external destination is an
     # exfil/external-side-effect surface (like messaging), so it is opt-in
     # (capability_default=False): a policy that names ``publish`` while omitting
@@ -1497,6 +1504,54 @@ def _command_deny_patterns(control: object) -> Tuple[str, ...]:
     return ()
 
 
+_AGENTCORE_SCOPE = "capabilities.agentcore"
+_AGENTCORE_POSTURES = frozenset({"workload", "login"})
+
+
+def _capability_raw_for_gate(scope: str, raw: Mapping[str, object]) -> Mapping[str, object]:
+    """Drop inner policy data that is not a CapabilityGate field.
+
+    ``capabilities.agentcore.posture`` is policy data, not a second scope and
+    not an evaluator input. Strip it so ``CapabilityGate.from_dict`` stays
+    ``additionalProperties: false`` for every other capability.
+    """
+    if scope != _AGENTCORE_SCOPE or "posture" not in raw:
+        return raw
+    return {key: value for key, value in raw.items() if key != "posture"}
+
+
+def _apply_agentcore_posture(
+    data: Mapping[str, object],
+    controls: Dict[str, object],
+    boot: "BootControls",
+) -> None:
+    """Fail closed when agentcore is enabled without a known posture.
+
+    Missing or unknown ``posture`` with ``enabled: true`` aborts when
+    ``boot.fail_closed``; otherwise the row is treated as disabled. Disabled
+    (or unnamed) rows do not require a posture.
+    """
+    raw_caps = data.get("capabilities")
+    if not isinstance(raw_caps, dict):
+        return
+    raw = raw_caps.get("agentcore")
+    if not isinstance(raw, dict):
+        return
+    control = controls.get(_AGENTCORE_SCOPE)
+    if not isinstance(control, CapabilityGate) or not control.enabled:
+        return
+    posture = raw.get("posture")
+    if posture in _AGENTCORE_POSTURES:
+        return
+    reason = (
+        f"capabilities.agentcore is enabled but posture is {posture!r}; "
+        "expected 'workload' or 'login'"
+    )
+    if boot.fail_closed:
+        raise PlatformCompositionError(reason)
+    controls[_AGENTCORE_SCOPE] = CapabilityGate(enabled=False, scopes=control.scopes)
+
+
 def _parse_control(scope: str, spec: ScopeSpec, raw: object, *, is_policy: bool) -> object:
     """Parse one raw JSON control value into its archetype, per the catalog."""
     if not isinstance(raw, dict):
@@ -1513,8 +1568,9 @@ def _parse_control(scope: str, spec: ScopeSpec, raw: object, *, is_policy: bool)
             raise PlatformCompositionError(f"ordinal scope {scope!r} needs a string value")
         return OrdinalControl(scale=spec.ordinal_scale, value=value)
     if spec.kind == CAPABILITY:
+        gate_raw: Mapping[str, object] = _capability_raw_for_gate(scope, raw)
         return CapabilityGate.from_dict(
-            raw, default_enabled=spec.capability_default, scope_matchers=spec.scope_matchers
+            gate_raw, default_enabled=spec.capability_default, scope_matchers=spec.scope_matchers
         )
     if spec.kind == SCOPEDMAP:
         return ScopedMap.from_dict(raw, allow_posture=is_policy)
@@ -1745,6 +1801,7 @@ def parse_policy(
         fail_closed=bool(boot_raw.get("fail_closed", True)),
     )
     controls = _parse_controls(data, is_policy=True)
+    _apply_agentcore_posture(data, controls, boot)
     identity = data.get("identity") or {}
     issuer = str(identity.get("issuer", "")) if isinstance(identity, dict) else ""
     signature = str(identity.get("signature", "")) if isinstance(identity, dict) else ""
@@ -1776,9 +1833,9 @@ def parse_policy(
                 f"security policy 'fallback' may not contain structural key(s) {stray} — "
                 "it is a controls-only profile body"
             )
-        fallback_profile = Profile(
-            name="_fallback", controls=_parse_controls(raw_fallback, is_policy=False)
-        )
+        fallback_controls = _parse_controls(raw_fallback, is_policy=False)
+        _apply_agentcore_posture(raw_fallback, fallback_controls, boot)
+        fallback_profile = Profile(name="_fallback", controls=fallback_controls)
     return GovernanceCeiling(
         version=POLICY_VERSION,
         boot=boot,
@@ -1843,6 +1900,10 @@ def parse_profile(data: Mapping[str, object]) -> Profile:
     # whole profile. Any other unknown child still raises. See _parse_controls.
     unknown: List[str] = []
     controls = _parse_controls(data, is_policy=False, unknown_out=unknown, profile_name=name)
+    # A profile that enables agentcore without a known posture is indistinguishable
+    # from a misconfigured ceiling: fail closed (the loader turns this raise
+    # into the deny-all fallback).
+    _apply_agentcore_posture(data, controls, BootControls(fail_closed=True))
     return Profile(
         name=name,
         bind=bind,

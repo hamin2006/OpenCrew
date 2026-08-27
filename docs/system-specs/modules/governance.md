@@ -1203,6 +1203,8 @@ default on; a deny makes the tool refuse outright, and it does NOT fall back to
 the `commands` scope, so denying browsing wholesale means denying both this
 capability AND the `playwright-cli` command),
 `capabilities.publish` (artifact publish chokepoint — see below),
+`capabilities.agentcore` (opt-in agent workload identity + Gateway MCP —
+see below),
 `capabilities.theme_persona` / `capabilities.theme_install`, and
 `capabilities.telemetry` (the anonymous beacon: send gate + both write
 chokepoints — **policy layer only**, see below). Only the live `approval_mode`
@@ -1243,6 +1245,18 @@ surface-agnostic Settings > Security snapshot + the builtin-toggle 409 check, so
 a rule pinned by any profile renders locked and rejects a disable rather than
 surfacing a no-op opt-out (UI success while the bound-profile gate still denies).
 Display-only union — it does not widen enforcement.
+
+`capabilities.agentcore` is a `CapabilityGate` (opt-in: `capability_default=False`,
+like `capabilities.publish` / `capabilities.messaging`). It is a catalog data row
+only — the evaluator is untouched. The inner `posture` field is policy data, not
+a second scope: `workload` (unattended sessions may vend a workload access token)
+or `login` (a human must be present; unattended sessions get no Gateway inbound
+JWT). An `enabled: true` document with a missing or unknown `posture` fails
+closed — the row is treated as disabled, or boot aborts when `boot.fail_closed`.
+The public `DefaultAgentIdentityProvider` is disabled, so a standalone host with
+no policy is unchanged. Later work consults this row at rebuild / Gateway
+injection; naming it here is what lets a policy pin the capability before those
+chokepoints land.
 
 `capabilities.publish` is a `CapabilityGate` (opt-in: `capability_default=False`)
 with an inner `destinations` `ScopedRuleset` (`identifier` matcher) bounding

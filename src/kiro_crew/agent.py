@@ -855,6 +855,39 @@ def _extra_mcp_servers() -> dict[str, dict]:
     return dict(extra) if extra else {}
 
 
+def _agent_identity_enabled() -> bool:
+    """Whether the composed agent-identity seam is on.
+
+    Standalone Default returns False, so rebuild stays byte-identical. A
+    transient adapter error degrades to False (never to enabled) via
+    ``safe_context_call``. ``PlatformCompositionError`` still aborts.
+    """
+    return bool(
+        safe_context_call(
+            lambda: current_context().agent_identity.enabled(),
+            fallback=False,
+            log_message="agent_identity.enabled lookup failed; treating as disabled",
+        )
+    )
+
+
+def _note_agent_identity_if_enabled() -> None:
+    """Live consumption of ``ctx.agent_identity``; no-op when the Default is off.
+
+    Later work keys Gateway MCP / login-mode withhold on this probe. Reading
+    ``status()`` here is display-only and uses an empty-dict fallback so a
+    raised adapter cannot degrade to "enabled".
+    """
+    if not _agent_identity_enabled():
+        return
+    status: dict[str, object] = safe_context_call(
+        lambda: dict(current_context().agent_identity.status()),
+        fallback={},
+        log_message="agent_identity.status lookup failed; omitting status",
+    )
+    logger.debug("agent_identity enabled; status keys=%s", sorted(status))
+
+
 def _extra_mcp_scope_globals() -> list[Path]:
     """Provider-global MCP config files contributed by the edition (CPP seam).
 
@@ -3362,6 +3395,10 @@ def rebuild_agent_config(*, clean: bool = False) -> Path:
     # withhold audit near the end describe the SAME decision (see
     # _gated_off_servers).
     gated_off = _gated_off_servers()
+
+    # Live agent_identity seam. Disabled Default is a no-op so standalone
+    # rebuild stays byte-identical.
+    _note_agent_identity_if_enabled()
 
     if not clean and path.exists():
         # Existing config — preserve user customizations, only refresh
