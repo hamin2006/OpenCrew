@@ -356,14 +356,15 @@ def _scan_key(sid_for_stem: Mapping[str, str]) -> tuple[object, ...]:
 
     Pairing is the rest of it: it decides which unit a transcript belongs to, so a
     session that gained or lost its mapping must not be answered from an older
-    pass. Compared by value rather than hashed — a hash collision here would serve
-    a pass built under different assumptions, and the whole point of the key is
-    that it cannot.
+    pass. The mapping is compared directly by dict equality — still by value,
+    never hashed — because a hash collision here would serve a pass built under
+    different assumptions, and the whole point of the key is that it cannot. Dict
+    equality is order-free, so no sort is paid on the hot cache-hit path.
     """
     return (
         str(kiro_sessions_dir()),
         str(_crew_sessions_dir()),
-        tuple(sorted(sid_for_stem.items())),
+        dict(sid_for_stem),
     )
 
 

@@ -925,6 +925,92 @@ class TestScanCache:
 
         assert session_storage.list_units(_index()) == []
 
+    def test_a_hit_is_served_for_an_equal_but_distinct_pairing_dict(
+        self, stores: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The key compares the pairing by value, so a fresh dict of equal
+        contents must reuse the pass — callers rebuild the mapping per call."""
+        crew_home, kiro_home = stores
+        stem = transcript_stem("dashboard:chat-1")
+        _cli_half(kiro_home, "aaaa1111", log_bytes=32, age_days=40)
+        _transcript(crew_home, stem, size=64, age_days=40)
+
+        session_storage.list_units(_multi_index({stem: "aaaa1111"}))  # prime
+
+        calls = 0
+        real = session_storage._scan_raw_uncached
+
+        def counted(sid_for_stem):
+            nonlocal calls
+            calls += 1
+            return real(sid_for_stem)
+
+        monkeypatch.setattr(session_storage, "_scan_raw_uncached", counted)
+        # A distinct dict object with equal contents (and different insertion
+        # history, so an order-sensitive comparison would also be exposed).
+        session_storage.list_units(_multi_index(dict([(stem, "aaaa1111")])))
+
+        assert calls == 0, "an equal-by-value pairing must be served from the cached pass"
+
+    def test_a_repointed_stem_with_unchanged_length_is_a_miss(
+        self, stores: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One stem repointed to a different sid, same mapping length, must
+        re-enumerate.
+
+        This is the guard that rules out memoising the pairing on
+        ``id()``/``len()``: CPython reuses ``id()`` after garbage collection, and
+        a length-preserving repoint is exactly the change such a key would miss —
+        serving a pass built under a different pairing.
+        """
+        crew_home, kiro_home = stores
+        stem1 = transcript_stem("dashboard:chat-1")
+        stem2 = transcript_stem("dashboard:chat-2")
+        _cli_half(kiro_home, "aaaa1111", log_bytes=32, age_days=40)
+        _cli_half(kiro_home, "bbbb2222", log_bytes=32, age_days=40)
+        _transcript(crew_home, stem1, size=64, age_days=40)
+        _transcript(crew_home, stem2, size=64, age_days=40)
+
+        session_storage.list_units(
+            _multi_index({stem1: "aaaa1111", stem2: "bbbb2222"})
+        )  # prime
+
+        calls = 0
+        real = session_storage._scan_raw_uncached
+
+        def counted(sid_for_stem):
+            nonlocal calls
+            calls += 1
+            return real(sid_for_stem)
+
+        monkeypatch.setattr(session_storage, "_scan_raw_uncached", counted)
+        # Same keys, same length — only one value repointed.
+        session_storage.list_units(_multi_index({stem1: "aaaa1111", stem2: "aaaa1111"}))
+
+        assert calls == 1, "a repointed pairing must not be answered from the old pass"
+
+    def test_scan_key_pairing_equality_matches_the_sorted_tuple_form(self) -> None:
+        """``dict(a) == dict(b)`` iff ``tuple(sorted(a.items())) == tuple(sorted(b.items()))``.
+
+        This pins the equivalence the key relies on: the dict snapshot answers the
+        equality question identically to the sorted-tuple form it replaced, across
+        empty, single-entry, reordered, repointed and disjoint mappings.
+        """
+        mappings: list[dict[str, str]] = [
+            {},
+            {"a": "1"},
+            {"a": "1", "b": "2"},
+            {"b": "2", "a": "1"},  # same contents, different insertion order
+            {"a": "1", "b": "3"},  # one value repointed, same length
+            {"a": "2", "b": "1"},  # values swapped
+            {"c": "9"},
+        ]
+        for a in mappings:
+            for b in mappings:
+                expected = tuple(sorted(a.items())) == tuple(sorted(b.items()))
+                got = session_storage._scan_key(a) == session_storage._scan_key(b)
+                assert got == expected, f"disagreement on {a!r} vs {b!r}"
+
 
 class TestSharedStoreRefusal:
     """An isolated data home over a shared replay store cannot see who is live."""
