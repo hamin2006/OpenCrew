@@ -1867,6 +1867,22 @@ class AcpRuntime:
         would otherwise fault with ``-32603 "Mode '<agent>' not found"``. An
         explicitly-empty ``availableModes: []`` therefore fails closed, not open.
         """
+        # opencode-style backends advertise their selectable agents as
+        # the configOptions ``mode`` select (their session responses
+        # carry no ``modes`` key). Consult it when present so set_mode
+        # only fires for an agent opencode actually knows.
+        config_options = resp.get("configOptions")
+        if isinstance(config_options, list):
+            for opt in config_options:
+                if isinstance(opt, dict) and opt.get("id") == "mode":
+                    options = opt.get("options")
+                    if isinstance(options, list):
+                        ids = {
+                            str(o.get("value"))
+                            for o in options
+                            if isinstance(o, dict) and o.get("value")
+                        }
+                        return agent in ids
         ids, _current, advertised = parse_session_modes(resp)
         if not advertised:
             return True
@@ -2125,9 +2141,11 @@ class AcpRuntime:
                 METHOD_SESSION_LOAD, load_params, timeout=budget
             )
 
-            # A genuine resume echoes "modes" in the response (same signal AcpClient
-            # keys on). Anything else means load did not actually restore state.
-            if "modes" not in resp:
+            # A genuine resume echoes "modes" in the response (same
+            # signal AcpClient keys on); opencode-style backends instead
+            # return a configOptions-only payload on a successful load.
+            # Anything else means load did not actually restore state.
+            if "modes" not in resp and "configOptions" not in resp:
                 raise AcpRuntimeError(
                     f"session/load did not resume session {resume_sid}: {resp}"
                 )

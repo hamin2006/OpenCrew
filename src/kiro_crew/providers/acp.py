@@ -424,6 +424,18 @@ class AcpProvider(LLMProvider):
         return self._client.backend == ACP_BACKEND_KAS
 
     @property
+    def _is_opencode_style(self) -> bool:
+        """True when the backing session is opencode-shaped (``ses_*`` sid).
+
+        opencode resolves session ids in its own storage, so resume and
+        config-option pushes use ACP verbs (session/load,
+        session/set_config_option) rather than kiro-cli's commands/execute
+        overlay machinery.
+        """
+        sid = getattr(self._client, "session_id", None) or ""
+        return str(sid).startswith("ses_")
+
+    @property
     def is_kiro_backend(self) -> bool:
         """True when this ACP provider talks to kiro-cli.
 
@@ -1043,6 +1055,11 @@ class AcpProvider(LLMProvider):
         try:
             if self.is_claude_backend:
                 await self._set_claude_effort(level)
+            elif self._is_opencode_style:
+                # opencode has no commands/execute: set the effort
+                # config option directly (session/set_config_option
+                # validates against the advertised effort levels).
+                await self._client.set_config_option("effort", level)
             else:
                 await self._client.send_command("/effort", args={"level": level})
         except Exception:
@@ -1091,12 +1108,21 @@ class AcpProvider(LLMProvider):
             # No live "reset to default" — caller must reset the session.
             logger.info("ACP effort cleared (claude); session reset needed for default")
             return False
-        # kiro: clear/rewrite the overlay so a respawn doesn't re-apply it.
+        # kiro/opencode: clear/rewrite the overlay so a respawn doesn't
+        # re-apply it; a resolvable workspace default is pushed live.
         level = self._resolve_effort()  # workspace default, or None
         if level:
             self._apply_effort_overlay()
-            await self._client.send_command("/effort", args={"level": level})
-            logger.info("ACP effort cleared to workspace default %s (kiro)", level)
+            if self._is_opencode_style:
+                await self._client.set_config_option("effort", level)
+                logger.info(
+                    "ACP effort cleared to workspace default %s (opencode)", level
+                )
+            else:
+                await self._client.send_command("/effort", args={"level": level})
+                logger.info(
+                    "ACP effort cleared to workspace default %s (kiro)", level
+                )
             return True
         # No default to push live — clear the overlay and let the caller reset
         # so kiro respawns at the model's built-in default.
@@ -1223,6 +1249,10 @@ class AcpProvider(LLMProvider):
     def context_used_tokens(self) -> int:
         return self._client.last_prompt_stats.context_used_tokens
 
+    def session_cost(self) -> float:
+        """Session cost in USD reported by the backend (0.0 = unknown)."""
+        return self._client.last_prompt_stats.session_cost
+
     async def compact(self, context: str = "") -> None:
         """Trigger native /compact with optional context-preserving prompt."""
         if context:
@@ -1256,6 +1286,17 @@ class AcpProvider(LLMProvider):
                     "type": event.text,
                     "summary": event.title or "",
                 }
+        if self._compact_result is None:
+            _sid = getattr(self._client, "session_id", None) or ""
+            if _sid.startswith("ses_"):
+                # opencode compacts natively and emits no
+                # _kiro.dev/compaction/status: the /compact turn completes
+                # only after session.summarize ran (the following
+                # usage_update reports the compacted context). Marking the
+                # prompt completion as success stops the caller from
+                # timing out and counting a successful compact as a
+                # failure (cooldown -> circuit breaker -> recycle).
+                self._compact_result = {"type": "completed", "summary": ""}
 
     async def cancel(self, *, wait_ack_timeout: float = 0.0) -> CancelOutcome:
         """Cancel in-flight operation via ACP session/cancel."""
@@ -1316,6 +1357,17 @@ class AcpProvider(LLMProvider):
                 if drain is not None:
                     await drain()
             return cached
+        _sid = getattr(self._client, "session_id", None) or ""
+        if _sid.startswith("ses_"):
+            # opencode compacts inline: the /compact turn completing IS
+            # the completion signal (no _kiro.dev/compaction/status
+            # exists), so the delegated queue wait would time out and
+            # the caller would count a successful compact as a failure
+            # (cooldown -> circuit breaker -> session recycle).
+            drain = getattr(self._client, "_drain_post_compaction_metadata", None)
+            if drain is not None:
+                await drain()
+            return {"type": "completed", "summary": ""}
         return await self._client.wait_for_compaction(timeout)
 
     async def new_conversation(self) -> None:

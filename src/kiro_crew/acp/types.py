@@ -148,11 +148,13 @@ ACP_BACKENDS_SELECTABLE = frozenset({ACP_BACKEND_KIRO, ACP_BACKEND_KAS})
 # demux) AND can persist a SHARED subagent session across teardown. KAS runs on
 # AcpRuntime (multi-session), but its teardown maps to _kiro/session/delete,
 # which removes the persisted session — so a shared subagent would strand
-# spawn_continue (conversation_gone). KAS therefore opts in only once a
-# keep-aware teardown lands (native subagent work); until then its subagents get
-# dedicated sessions. claude-agent-acp runs through AcpClient (one process per
-# session) and is not a member.
-ACP_BACKENDS_SESSION_SHARING = frozenset({ACP_BACKEND_KIRO})
+# spawn_continue (conversation_gone). KAS is admitted because the teardown
+# concern does not apply to an opencode-backed KAS: the delete verb is a
+# best-effort no-op there (opencode keeps its own storage), SessionMap skips
+# file checks for non-kiro providers, and sid validity is decided by
+# session/load — so shared-arm sessions stay resumable. claude-agent-acp runs
+# through AcpClient (one process per session) and is not a member.
+ACP_BACKENDS_SESSION_SHARING = frozenset({ACP_BACKEND_KIRO, ACP_BACKEND_KAS})
 
 # Backends implementing the ``_session/steer`` extension (mid-turn steer).
 ACP_BACKENDS_STEER = frozenset({ACP_BACKEND_KIRO, ACP_BACKEND_KAS})
@@ -176,7 +178,9 @@ ACP_BACKENDS_INTERNAL_SANDBOX = frozenset({ACP_BACKEND_KIRO})
 # ``not is_claude_backend`` — an inference that silently captures every harness
 # added later. This is a SUPERSET of ACP_BACKENDS_SESSION_SHARING: running on
 # AcpRuntime is necessary for session sharing but not sufficient (KAS runs here
-# yet is excluded from sharing until keep-aware teardown lands).
+# yet was excluded from sharing until keep-aware teardown landed — with an
+# opencode-backed KAS the teardown verb is a no-op and shared sessions stay
+# resumable, so it is now admitted).
 ACP_BACKENDS_ACP_RUNTIME = frozenset({ACP_BACKEND_KIRO, ACP_BACKEND_KAS})
 
 # ── Provider labels ──
@@ -617,6 +621,9 @@ class AcpPromptStats:
     # first sees a session that just hit its context ceiling as brand new.
     # Cleared the moment a real percentage or usage_update lands.
     context_pct_unknown: bool = False
+    # Session cost in USD reported by the backend's usage_update.cost.amount.
+    # opencode sends this on every usage_update; 0.0 = unknown.
+    session_cost: float = 0.0
 
     def carry_over(self) -> "AcpPromptStats":
         """Return fresh per-turn stats carrying this turn's context state.
@@ -631,6 +638,7 @@ class AcpPromptStats:
             context_window_tokens=self.context_window_tokens,
             context_tokens_from_usage=self.context_tokens_from_usage,
             context_pct_unknown=self.context_pct_unknown,
+            session_cost=self.session_cost,
         )
 
     def reset_context_state(self) -> None:

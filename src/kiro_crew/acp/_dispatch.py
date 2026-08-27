@@ -1139,3 +1139,44 @@ __all__ = [
     "METHOD_SET_MODE",
     "METHOD_SET_MODEL",
 ]
+
+
+
+def resolve_opencode_wire_id(config_options: object, model_id: str) -> str:
+    """Map a dashboard display label to opencode's ``provider/model`` wire id.
+
+    The dashboard catalog labels models as ``"Name (Provider Display)"`` while
+    opencode's configOptions model select names them ``"Provider Display/Name"``.
+    Wire ids (contain ``/``) and the empty/``auto`` sentinels pass through; an
+    unmappable label also passes through so the caller's own handling decides
+    (``AcpModelUnavailable``, or a graceful backend default).
+
+    Exact candidate match wins; a bare-name (name-part) match is the fallback
+    so raw models.dev names (``"DeepSeek V4 Flash"``) still resolve.
+    """
+    if not model_id or model_id == "auto" or "/" in model_id:
+        return model_id
+    _label = model_id.strip()
+    m = re.match(r"^(?P<name>.*) \((?P<provider>[^()]*)\)$", _label)
+    candidate = f"{m.group('provider')}/{m.group('name')}" if m else ""
+    if not isinstance(config_options, (list, tuple)):
+        return model_id
+    for opt in config_options:
+        if not isinstance(opt, dict) or opt.get("id") != "model":
+            continue
+        _options = opt.get("options", []) or []
+        for o in _options:
+            if (
+                isinstance(o, dict)
+                and o.get("value")
+                and candidate
+                and str(o.get("name") or "") == candidate
+            ):
+                return str(o["value"])
+        for o in _options:
+            if not isinstance(o, dict) or not o.get("value"):
+                continue
+            if str(o.get("name") or "").split("/", 1)[-1] == _label:
+                return str(o["value"])
+        break
+    return model_id

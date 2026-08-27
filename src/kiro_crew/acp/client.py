@@ -36,6 +36,7 @@ from typing import Any, AsyncGenerator, AsyncIterator, Callable, Sequence, TypeV
 
 from kiro_crew import model_registry, platform_compat
 from kiro_crew.acp._dispatch import (
+    resolve_opencode_wire_id,
     _kiro_mcp_server_name,
     _kiro_tool_name,
     extract_tool_purpose,
@@ -2210,6 +2211,10 @@ class AcpClient:
         """Switch model on a running session (used by warm pool post-claim)."""
         if not self._session_id:
             raise AcpError("Cannot set model before session is initialized")
+        # opencode (kas): the dashboard stores display labels in slot.model;
+        # map to the provider/model wire id via this session's configOptions
+        # before the wire (wire ids pass through unchanged).
+        model_id = resolve_opencode_wire_id(self._config_options, model_id)
         # Unlike the spawn path, this is an explicit request for THIS model, so
         # a silent downgrade would report success while running something else.
         # Refuse before the wire and name what the account can use.
@@ -3120,7 +3125,15 @@ class AcpClient:
                 session_file = str(
                     kiro_sessions_dir() / f"{resume_sid}.json"
                 )
-                file_ok = Path(session_file).exists()
+                # kiro-cli stores its transcripts at that path; an
+                # opencode sid (ses_*) never does. opencode resolves
+                # the sid itself and errors on unknown ids, so a ses_
+                # sid skips the transcript gate and is loaded with no
+                # file path advertised.
+                _opencode_sid = resume_sid.startswith("ses_")
+                file_ok = Path(session_file).exists() or _opencode_sid
+                if _opencode_sid:
+                    session_file = ""
             if file_ok:
                 try:
                     load_params: dict = {
@@ -3139,11 +3152,14 @@ class AcpClient:
                     }
                     if self._is_claude:
                         load_params["_meta"] = {"claudeCode": {"options": {}}}
-                    else:
+                    elif session_file:
                         load_params["_meta"] = {"_kiro.dev/session_file": session_file}
                     load_id = await self._send_request(METHOD_SESSION_LOAD, load_params)
                     load_resp = await self._wait_for_response(load_id, timeout=_INIT_TIMEOUT)
-                    if "modes" in load_resp:
+                    # A genuine kiro-cli/KAS resume echoes "modes";
+                    # opencode's successful load returns a
+                    # configOptions-only payload. Accept either.
+                    if "modes" in load_resp or "configOptions" in load_resp:
                         self._session_id = resume_sid
                         self._resumed = True
                         self._capture_available_models(load_resp)
@@ -4745,6 +4761,14 @@ class AcpClient:
             # parse_usage_update validates both fields at the shared
             # chokepoint used by AcpSessionHandle._handle_update too.
             used, size = parse_usage_update(update)
+            # opencode sends the session cost in usage_update.cost.amount (USD).
+            # Capture it regardless of whether used/size parsed, so the
+            # dashboard "spent" figure tracks the backend's billing.
+            cost = update.get("cost")
+            if isinstance(cost, dict):
+                amount = cost.get("amount")
+                if isinstance(amount, (int, float)) and not isinstance(amount, bool):
+                    self.last_prompt_stats.session_cost = float(amount)
             if used is not None and size and size > 0:
                 self.last_prompt_stats.context_pct = round((used / size) * 100, 1)
                 # Keep the raw counts so the dashboard token text uses the real

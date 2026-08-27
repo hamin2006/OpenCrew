@@ -29,6 +29,7 @@ from typing import Any, Protocol
 from kiro_crew import model_registry
 from kiro_crew.acp import kas_wire
 from kiro_crew.acp._dispatch import (
+    resolve_opencode_wire_id,
     build_permission_event,
     classify_notification,
     parse_metadata,
@@ -900,6 +901,10 @@ class AcpSessionHandle:
             # _bg session the current model IS session/new's served default.
             return
         if self._runtime.acp_backend == ACP_BACKEND_KAS:
+            # opencode stores the dashboard display label in slot.model;
+            # map it to the provider/model wire id via this session's
+            # configOptions (wire ids pass through unchanged).
+            resolved = resolve_opencode_wire_id(self._config_options, resolved)
             # KAS implements no ``session/set_model``; the model is one of its
             # session config options instead. Same effect, different verb — so
             # the bookkeeping below is shared rather than duplicated.
@@ -938,6 +943,11 @@ class AcpSessionHandle:
         text = (message or "").strip()
         if not text or not self._session_id:
             return False
+        if self._session_id.startswith("ses_"):
+            # opencode implements no _session/steer — a fire-and-forget
+            # send would be silently dropped. False routes the message
+            # through the caller's queue/re-run fallback instead.
+            return False
         wrapped = f"<user_message>\n{text}\n</user_message>"
         await self._runtime.send_request(
             "_session/steer",
@@ -947,8 +957,14 @@ class AcpSessionHandle:
 
     @property
     def supports_steer(self) -> bool:
-        """True — AcpRuntime is kiro-cli only, which supports _session/steer."""
-        return True
+        """True for kiro-cli, which supports ``_session/steer``.
+
+        opencode has no steer extension — a fire-and-forget send would
+        be silently dropped (the redirect text would vanish, not even
+        queue for the next turn). Gating it off routes steers through
+        the caller's graceful fallback (re-run/queued after the turn).
+        """
+        return not self._session_id.startswith("ses_")
 
     # ── Commands & Config ──
 
@@ -1023,6 +1039,15 @@ class AcpSessionHandle:
                     "type": event.text,
                     "summary": event.title or "",
                 }
+        if self._compact_result is None and self._session_id.startswith("ses_"):
+            # opencode compacts natively and emits no
+            # _kiro.dev/compaction/status: the /compact turn completes
+            # only after session.summarize ran (the following
+            # usage_update reports the compacted context). Marking the
+            # prompt completion as success stops the caller from timing
+            # out and counting a successful compact as a failure
+            # (cooldown -> circuit breaker -> session recycle).
+            self._compact_result = {"type": "completed", "summary": ""}
 
     async def wait_for_compaction(
         self, timeout: float = COMPACT_WAIT_TIMEOUT_SECS
@@ -1045,6 +1070,18 @@ class AcpSessionHandle:
                 # fallback.
                 await self._drain_post_compaction_metadata()
             return cached
+        if self._session_id.startswith("ses_"):
+            # opencode compacts inline: the /compact turn completing IS
+            # the completion signal — it emits no
+            # _kiro.dev/compaction/status, so the queue drain below
+            # would wait out the full timeout and the caller would count
+            # a successful compact as a failure (cooldown -> circuit
+            # breaker -> session recycle). The usage_update reporting
+            # the compacted context was already processed by the
+            # dispatch loop; a brief drain lets any trailing frame land
+            # before callers broadcast.
+            await self._drain_post_compaction_metadata()
+            return {"type": "completed", "summary": ""}
         deadline = time.monotonic() + timeout
         # ONE buffer for this call AND the nested grace drain, restored at ONE
         # point (the finally below) strictly BEFORE any re-poison. Separate
@@ -2684,6 +2721,11 @@ class AcpSessionHandle:
         # parse_usage_update reconciles the flat (AcpClient) and nested shapes.
         if session_update == "usage_update":
             used, size = parse_usage_update(update)
+            _cost = update.get("cost")
+            if isinstance(_cost, dict):
+                _amt = _cost.get("amount")
+                if isinstance(_amt, (int, float)) and not isinstance(_amt, bool):
+                    self.last_prompt_stats.session_cost = float(_amt)
             if used is not None and size:
                 try:
                     if size > 0:
