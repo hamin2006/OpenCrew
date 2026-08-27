@@ -431,7 +431,7 @@ describe('mochi context menu — focus returns to the opener on close (#6267 rev
     // it after the commit whenever that node is still in the document. So an
     // unconditional restore is overwritten right back to `elsewhere` here. The
     // guard is therefore belt-and-braces in this path rather than the thing that
-    // makes this test pass — no black-box test through React's unmount can
+    // makes this test pass — no closed-box test through React's unmount can
     // separate the two. Kept because it states the intent at the site, and
     // because it is the only thing protecting the invariant if the restore is
     // ever moved off the commit path (e.g. into an explicit Escape handler, the
