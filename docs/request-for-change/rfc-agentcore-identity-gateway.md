@@ -574,9 +574,10 @@ analogous to `mcp_gateway` declared-env forwarding
    to include the bearer, which re-partitions on every refresh and
    leaks a credential into a hash input). Per-session spawn is the
    honest cost.
-5. `IdentityProvider.credential_watch_paths()` (already wired) plus
-   inbound-token expiry drain the session's Gateway transport on
-   rotation.
+5. `IdentityProvider.credential_watch_paths()` stays the mcp_gateway
+   pooled-backend watcher. Gateway is unpooled, so inbound-token expiry
+   drains that session's ACP child (`drain_expired_gateway_transport` →
+   `SessionManager.remove`) instead of `pool.drain_all_to_bluegreen`.
 
 A local token-proxy MCP (Crew attaches the header, then forwards) is
 the unused fallback. Phase 0 did not run a live kiro-cli header probe;
@@ -751,7 +752,7 @@ vend.
 
 Companion contributes the Gateway URL. Core injects the inbound JWT
 per session (or the header-proxy fallback). Unpooled. Expiry drains
-the transport. Fail closed on miss.
+that session's ACP child (not the mcp_gateway pool). Fail closed on miss.
 
 Exit: a session with a valid JWT lists Gateway tools; a session
 without does not see the server; `kirocrew.json` contains no

@@ -192,8 +192,14 @@ async def bind_session_principal(
     if callable(setter):
         setter(session_key, annotated)
     try:
-        from kiro_crew.platform.agentcore_gateway import attach_gateway_inbound
+        from kiro_crew.platform.agentcore_gateway import (
+            attach_gateway_inbound,
+            drain_expired_gateway_transport,
+        )
 
+        # Expiry recycles the live ACP child before a new sidecar is written
+        # so session/new cannot keep a dead JWT in memory.
+        await drain_expired_gateway_transport(sessions, session_key)
         await attach_gateway_inbound(annotated)
     except PlatformCompositionError:
         raise

@@ -340,7 +340,10 @@ and a core-derived `raw_id`, the same function binds the principal:
    credential without a vaulted owner token: that writes a deny sidecar
    so `session/new` injects `{disabled: true}` and retracts the
    agent-file Gateway. Login posture never attaches for those unattended
-   keys. A miss or expiry leaves Gateway absent for that session. Token
+   keys. A miss or expiry leaves Gateway absent for that session. An
+   expired sidecar also recycles the live ACP child via
+   `SessionManager.remove` (map preserved) before a new sidecar is
+   written, so `session/new` cannot keep presenting a dead JWT. Token
    bytes never enter the agent file, SEL, logs, or `status()`. Dashboard
    chat binds this **before** `get_or_create` so `session/new` can inject
    the sidecar.

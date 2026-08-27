@@ -370,3 +370,122 @@ async def test_bind_session_principal_attaches_login_sidecar() -> None:
         sessions, surface="dashboard", raw_id="alice", session_key="dashboard:bind"
     )
     assert inbound_sidecar_path("dashboard:bind").exists()
+
+
+class _RecordingSessions:
+    def __init__(self) -> None:
+        self.principals: dict[str, SessionPrincipal] = {}
+        self.removed: list[str] = []
+
+    def set_principal(self, key: str, principal: SessionPrincipal) -> None:
+        self.principals[key] = principal
+
+    async def remove(self, key: str) -> None:
+        self.removed.append(key)
+
+
+@pytest.mark.asyncio
+async def test_expired_sidecar_recycles_live_session() -> None:
+    from kiro_crew.platform.agentcore_gateway import (
+        attach_gateway_inbound,
+        drain_expired_gateway_transport,
+        inbound_sidecar_path,
+        session_gateway_servers,
+    )
+
+    expired = InboundToken(scheme="bearer", token=_TOKEN, expires_at=1.0, audience="gateway")
+    _install(posture="login", spec={"url": _GATEWAY_URL}, token=expired)
+    await attach_gateway_inbound(_principal("dashboard:exp"))
+    assert inbound_sidecar_path("dashboard:exp").exists()
+
+    sessions = _RecordingSessions()
+    drained = await drain_expired_gateway_transport(sessions, "dashboard:exp")
+    assert drained is True
+    assert sessions.removed == ["dashboard:exp"]
+    assert inbound_sidecar_path("dashboard:exp").exists() is False
+    assert session_gateway_servers("dashboard:exp") == []
+
+
+@pytest.mark.asyncio
+async def test_live_sidecar_does_not_recycle_session() -> None:
+    from kiro_crew.platform.agentcore_gateway import (
+        attach_gateway_inbound,
+        drain_expired_gateway_transport,
+    )
+
+    _install(posture="login", spec={"url": _GATEWAY_URL}, token=_live_token())
+    await attach_gateway_inbound(_principal("dashboard:live"))
+    sessions = _RecordingSessions()
+    drained = await drain_expired_gateway_transport(sessions, "dashboard:live")
+    assert drained is False
+    assert sessions.removed == []
+
+
+@pytest.mark.asyncio
+async def test_absent_sidecar_does_not_recycle_session() -> None:
+    from kiro_crew.platform.agentcore_gateway import drain_expired_gateway_transport
+
+    _install(posture="login", spec={"url": _GATEWAY_URL}, token=_live_token())
+    sessions = _RecordingSessions()
+    drained = await drain_expired_gateway_transport(sessions, "dashboard:missing")
+    assert drained is False
+    assert sessions.removed == []
+
+
+@pytest.mark.asyncio
+async def test_bind_recycles_then_writes_fresh_sidecar() -> None:
+    from kiro_crew.platform.agent_identity import bind_session_principal
+    from kiro_crew.platform.agentcore_gateway import (
+        attach_gateway_inbound,
+        inbound_sidecar_path,
+        session_gateway_servers,
+    )
+
+    expired = InboundToken(scheme="bearer", token=_TOKEN, expires_at=1.0, audience="gateway")
+    _install(posture="login", spec={"url": _GATEWAY_URL}, token=expired)
+    await attach_gateway_inbound(_principal("dashboard:rebind"))
+    _install(posture="login", spec={"url": _GATEWAY_URL}, token=_live_token())
+    sessions = _RecordingSessions()
+    await bind_session_principal(
+        sessions, surface="dashboard", raw_id="alice", session_key="dashboard:rebind"
+    )
+    assert sessions.removed == ["dashboard:rebind"]
+    path = inbound_sidecar_path("dashboard:rebind")
+    assert path.exists()
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    assert sidecar["headers"]["Authorization"] == f"bearer {_TOKEN}"
+    assert sidecar["expires_at"] == 4_000_000_000.0
+    injected = session_gateway_servers("dashboard:rebind")
+    assert injected[0]["headers"][0]["value"] == f"bearer {_TOKEN}"
+
+
+def test_expired_drain_sel_has_no_token(caplog: pytest.LogCaptureFixture) -> None:
+    from kiro_crew.platform.agentcore_gateway import (
+        attach_gateway_inbound,
+        drain_expired_gateway_transport,
+    )
+    from kiro_crew.sel import sel
+
+    expired = InboundToken(scheme="bearer", token=_TOKEN, expires_at=1.0, audience="gateway")
+    _install(posture="login", spec={"url": _GATEWAY_URL}, token=expired)
+    caplog.set_level(logging.DEBUG)
+
+    async def _run() -> None:
+        await attach_gateway_inbound(_principal("dashboard:sel"))
+        await drain_expired_gateway_transport(_RecordingSessions(), "dashboard:sel")
+
+    import asyncio
+
+    asyncio.run(_run())
+    assert _TOKEN not in caplog.text
+    events = sel().recent(limit=50)
+    blob = json.dumps(events)
+    assert _TOKEN not in blob
+    expired_rows = [
+        e
+        for e in events
+        if e.get("operation") == "agentcore.gateway_inbound"
+        and "reason=expired" in str(e.get("resources") or "")
+    ]
+    assert expired_rows, f"expected expired inbound SEL row in {events!r}"
+    assert expired_rows[0].get("outcome") == "denied"

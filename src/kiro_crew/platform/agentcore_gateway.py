@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -54,6 +55,15 @@ STATUS_CREDENTIAL_KIND = "credentialKind"
 STATUS_VAULTED_OWNER = "vaultedOwnerToken"
 CREDENTIAL_KIND_M2M = "m2m"
 CREDENTIAL_KIND_USER = "user"
+
+# Inbound sidecar states. ``expired`` is the drain trigger: the file is
+# gone and the live ACP child must be recycled so session/new cannot keep
+# presenting a dead JWT.
+SIDECAR_LIVE = "live"
+SIDECAR_DENIED = "denied"
+SIDECAR_EXPIRED = "expired"
+SIDECAR_ABSENT = "absent"
+REASON_EXPIRED = "expired"
 
 # Spec keys that are bearer material or a place to hide it. Stripped before
 # any write to ~/.kiro/agents/kirocrew.json.
@@ -312,8 +322,38 @@ def _write_owner_only_json(path: Path, payload: Mapping[str, Any]) -> None:
                 os.unlink(tmp)
 
 
+def inbound_sidecar_state(session_key: str) -> str:
+    """Classify this session's inbound sidecar without mutating it.
+
+    ``expired`` means a file is present and ``expires_at`` is in the past.
+    Callers that must drain a live ACP transport key off this, not off a
+    later ``read_inbound_sidecar`` miss (that helper deletes the file).
+    """
+    path = inbound_sidecar_path(session_key)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return SIDECAR_ABSENT
+    except (OSError, ValueError):
+        logger.warning("agentcore inbound sidecar unreadable; treating as absent")
+        return SIDECAR_ABSENT
+    if not isinstance(raw, dict):
+        return SIDECAR_ABSENT
+    if raw.get("denied") is True:
+        return SIDECAR_DENIED
+    expires_at = raw.get("expires_at")
+    if isinstance(expires_at, (int, float)) and expires_at <= time.time():
+        return SIDECAR_EXPIRED
+    return SIDECAR_LIVE
+
+
 def read_inbound_sidecar(session_key: str) -> dict[str, Any] | None:
     """Load this session's inbound sidecar, or ``None`` if missing / expired."""
+    state = inbound_sidecar_state(session_key)
+    if state in (SIDECAR_ABSENT, SIDECAR_EXPIRED):
+        if state == SIDECAR_EXPIRED:
+            clear_inbound_sidecar(session_key)
+        return None
     path = inbound_sidecar_path(session_key)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -322,13 +362,45 @@ def read_inbound_sidecar(session_key: str) -> dict[str, Any] | None:
     except (OSError, ValueError):
         logger.warning("agentcore inbound sidecar unreadable; treating as absent")
         return None
-    if not isinstance(raw, dict):
-        return None
-    expires_at = raw.get("expires_at")
-    if isinstance(expires_at, (int, float)) and expires_at <= time.time():
-        clear_inbound_sidecar(session_key)
-        return None
-    return raw
+    return raw if isinstance(raw, dict) else None
+
+
+async def drain_expired_gateway_transport(sessions: Any, session_key: str) -> bool:
+    """Recycle a live ACP child whose inbound JWT has expired.
+
+    Gateway is unpooled and injected on ``session/new``. An expired sidecar
+    is not enough on its own: kiro-cli still holds the dead header until
+    the child is gone. ``SessionManager.remove`` preserves the session map
+    so the next turn cold-starts and ``session/load`` restores the
+    conversation. Does not touch mcp_gateway pooled backends.
+
+    Returns True when an expired sidecar was found and cleared.
+    """
+    if not session_key:
+        return False
+    if inbound_sidecar_state(session_key) != SIDECAR_EXPIRED:
+        return False
+    clear_inbound_sidecar(session_key)
+    sel().log_api_access(
+        caller="system",
+        operation="agentcore.gateway_inbound",
+        outcome="denied",
+        source="agentcore_gateway",
+        resources=f"session={session_key} reason={REASON_EXPIRED}",
+    )
+    remover = getattr(sessions, "remove", None)
+    if callable(remover):
+        try:
+            result = remover(session_key)
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.debug(
+                "expired inbound drain could not recycle session %s",
+                session_key,
+                exc_info=True,
+            )
+    return True
 
 
 def session_gateway_servers(session_key: str) -> list[dict[str, Any]]:

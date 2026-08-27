@@ -169,7 +169,10 @@ Kiro defaults. Companion extras that carry `headers` / `Authorization`
 are stripped before the agent file is written. Gateway/token work stays
 behind the three-conjunct identity probe (adapter AND capability AND
 known posture). Gateway is unpooled: each session has its own inbound
-sidecar. Unattended session keys (`cron:`, `taskrunner:`) never receive a
+sidecar. An expired inbound sidecar recycles that session's ACP child
+(`SessionManager.remove`, session map preserved) so the next
+`session/new` cannot keep a dead JWT; this is not an mcp_gateway
+blue-green drain. Unattended session keys (`cron:`, `taskrunner:`) never receive a
 login-posture inbound JWT. Workload M2M may keep the agent-file Gateway;
 workload user/OBO without a vaulted owner token writes a deny sidecar so
 `session/new` injects `{name: agentcore-gateway, disabled: true}` and

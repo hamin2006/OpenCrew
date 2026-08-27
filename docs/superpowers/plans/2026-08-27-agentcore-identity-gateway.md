@@ -428,7 +428,7 @@ local header-proxy MCP. Do not implement both.
 
 **Either path:**
 
-- [ ] **Step 1: Write failing tests.**
+- [x] **Step 1: Write failing tests.**
 
   - `enabled() is False` → no Gateway server in the rebuilt agent config.
   - `enabled() is True` / posture `login` but `vend_gateway_inbound_token`
@@ -442,12 +442,12 @@ local header-proxy MCP. Do not implement both.
     (unpooled).
   - Token bytes never appear in a captured log / SEL fixture.
 
-- [ ] **Step 2: Implement the Phase 0-chosen path only.**
+- [x] **Step 2: Implement the Phase 0-chosen path only.**
 
   Gate contribution on `capabilities.agentcore` (fail closed when the
   capability is off, even if the companion `enabled()` is True).
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
 
   ```
   feat: inject per-session AgentCore Gateway inbound tokens
@@ -495,7 +495,7 @@ local header-proxy MCP. Do not implement both.
 
 ### Task 7: Companion package (out of this repository)
 
-Not landed in KiroCrew. The companion implements
+Not landed in Kiro Crew. The companion implements
 `AgentIdentityProvider` against:
 
 - `bedrock-agentcore:GetWorkloadAccessToken`
