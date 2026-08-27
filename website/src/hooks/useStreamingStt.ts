@@ -13,9 +13,12 @@ import { i18nT } from '../i18n/t'
  * batch hook.
  */
 
-/** Wire frame that tells the backend to end the Transcribe stream. Protocol,
+/** Wire frame that tells the backend to end the transcription stream. Protocol,
  *  not copy — it is never shown to anyone. */
 const STOP_FRAME = JSON.stringify({ type: 'stop' })
+
+/** `status.stage` reported while model weights are still being fetched. */
+const STAGE_DOWNLOADING = 'downloading'
 
 export const streamingSupported =
   typeof window !== 'undefined' &&
@@ -39,11 +42,21 @@ interface Opts {
   onDevice?: (label: string, id: string) => void
   /** Fired when the backend semantic endpointer judges the utterance complete. */
   onEndpoint?: () => void
+  /**
+   * Byte progress of a one-time model download the session is waiting on, or
+   * `null` once the recogniser is ready.
+   *
+   * The local recogniser fetches its weights on first use, and that is between
+   * 78 MB and 1.6 GB. Without this the user holds the mic against a session that
+   * looks identical to a hang, which is the worst possible first run, so the
+   * backend reports byte progress and the recording surface shows it.
+   */
+  onDownload?: (progress: { done: number; total: number } | null) => void
   /** Unthrottled per-frame audio features for canvas consumers (see mic.ts). */
   sampleRef?: { current: AudioSample }
 }
 
-export function useStreamingStt ({ onPartial, onFinal, onError, onLevel, onDevice, onEndpoint, sampleRef }: Opts) {
+export function useStreamingStt ({ onPartial, onFinal, onError, onLevel, onDevice, onEndpoint, onDownload, sampleRef }: Opts) {
   const [recording, setRecording] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const ctxRef = useRef<AudioContext | null>(null)
@@ -90,10 +103,16 @@ export function useStreamingStt ({ onPartial, onFinal, onError, onLevel, onDevic
   onDeviceRef.current = onDevice
   const onEndpointRef = useRef(onEndpoint)
   onEndpointRef.current = onEndpoint
+  const onDownloadRef = useRef(onDownload)
+  onDownloadRef.current = onDownload
 
   const cleanup = useCallback(() => {
     try { levelStopRef.current?.() } catch { /* ignore */ }
     levelStopRef.current = null
+    // Clear the download line on every teardown, including a cancel and the
+    // force-cleanup path: a progress figure left on screen after the session it
+    // described is gone reads as a transfer that is still running.
+    onDownloadRef.current?.(null)
     if (pendingStopTimerRef.current !== null) {
       clearTimeout(pendingStopTimerRef.current)
       pendingStopTimerRef.current = null
@@ -179,7 +198,10 @@ export function useStreamingStt ({ onPartial, onFinal, onError, onLevel, onDevic
       if (typeof ev.data !== 'string') return
       try {
         const msg = JSON.parse(ev.data)
-        if (msg.type === 'ready') resolveReady()
+        // `ready` also clears any download line: it is the one frame guaranteed
+        // to follow preparation, so the progress cannot be left on screen by a
+        // backend that reports no closing `status`.
+        if (msg.type === 'ready') { onDownloadRef.current?.(null); resolveReady() }
         else if (msg.type === 'partial') {
           const text = msg.text || ''
           lastPartial = text
@@ -203,6 +225,15 @@ export function useStreamingStt ({ onPartial, onFinal, onError, onLevel, onDevic
           // The composer already holds the streamed transcript (via onPartial),
           // so the caller can submit directly.
           if (msg.complete) onEndpointRef.current?.()
+        } else if (msg.type === 'status') {
+          // Preparation progress, ahead of `ready`. The only stage with anything
+          // to show is the weight download; every other stage is instant, so it
+          // clears the line rather than adding a message nobody can act on.
+          onDownloadRef.current?.(
+            msg.stage === STAGE_DOWNLOADING
+              ? { done: Number(msg.downloaded_bytes) || 0, total: Number(msg.total_bytes) || 0 }
+              : null,
+          )
         }
       } catch { /* ignore */ }
     }
