@@ -2,6 +2,44 @@
 
 from __future__ import annotations
 
+
+
+async def _normalize_slot_models(state: "DashboardState") -> None:
+    """Rewrite wire-id ``slot.model`` pins to display labels (one-time heal).
+
+    Before the label-first pick change, the pick API stored opencode
+    provider/model wire ids in ``slot.model``; the frontend's "offered" list
+    is label-keyed (``model_name``), so a wire pin rendered as "not offered".
+    Migrate persisted pins so the fix applies to already-pinned slots without
+    a re-pick. Labels pass through; unknown wire ids are left untouched.
+    """
+    try:
+        from kiro_crew.dashboard.chat_handlers import _opencode_model_catalog
+    except Exception:
+        return
+    try:
+        catalog = await _opencode_model_catalog()
+    except Exception:
+        return
+    if not catalog:
+        return
+    for slot in state._slots.values():
+        cur = slot.model
+        if not cur or cur == "auto" or "/" not in cur:
+            continue
+        label = next(
+            (
+                k
+                for k, v in catalog.items()
+                if v == cur and k != cur and " (" in k
+            ),
+            None,
+        )
+        if label and label != cur:
+            slot.model = label
+
+
+
 import asyncio
 import hashlib
 import json
@@ -393,6 +431,7 @@ async def restore_open_slots_async(state: DashboardState) -> int:
         # Always clear, even if a rehydrate raises — a stuck flag would silently
         # disable open-tab persistence for the rest of the process's life.
         state.restoring_open_slots = False
+    await _normalize_slot_models(state)
     return restored
 
 
@@ -1060,6 +1099,7 @@ async def restore_recent_sessions_async(
             await asyncio.sleep(0)
     finally:
         state.restoring_open_slots = False
+    await _normalize_slot_models(state)
     return restored
 
 

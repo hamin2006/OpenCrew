@@ -6015,7 +6015,7 @@ class DashboardState:
         nothing on the open path carries usage.
 
         ``payload`` is the frame as broadcast (``{slot, pct, used_tokens?,
-        window_tokens?, reset?}``). The snapshot mirrors it plus the slot's
+        window_tokens?, cost?, reset?}``). The snapshot mirrors it plus the slot's
         model, which the read side compares to decide whether the reading still
         describes the session (see ``_context_snapshot_fields``). ``pct`` is
         the load-bearing field and is stored on its own when that is all the
@@ -6057,6 +6057,13 @@ class DashboardState:
         if window:
             snapshot["window_tokens"] = window
             snapshot["used_tokens"] = payload.get("used_tokens", 0)
+        # Cost is mirrored too so the cold-read path (gateway restart,
+        # expired ACP process) can show Spent on page load without a
+        # turn — same survival contract as pct. `_context_reading`
+        # filters non-finite values, so store what the frame carried.
+        cost = payload.get("cost")
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost > 0:
+            snapshot["cost"] = round(cost, 4)
         with self._context_snapshots_lock:
             if self._context_snapshots.get(slot_key) == snapshot:
                 return  # unchanged — nothing for the next flush to write

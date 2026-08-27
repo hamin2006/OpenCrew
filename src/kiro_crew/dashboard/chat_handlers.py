@@ -705,7 +705,9 @@ def _finite_number(value: Any) -> float | None:
     return float(value) if math.isfinite(value) else None
 
 
-def _context_reading(pct: Any, used: Any, window: Any, *, stale: bool) -> dict[str, Any]:
+def _context_reading(
+    pct: Any, used: Any, window: Any, *, stale: bool, cost: Any = None
+) -> dict[str, Any]:
     """Assemble the context fields from a (pct, used, window) triple.
 
     ``pct`` is the PRIMARY signal and the only one the bar needs: kiro-cli
@@ -720,6 +722,9 @@ def _context_reading(pct: Any, used: Any, window: Any, *, stale: bool) -> dict[s
     approximation derived from pct, so honesty costs nothing — and leaving the
     count on the wire would make every other consumer of this endpoint render a
     never-measured figure as measured unless it knew to drop it.
+
+    ``cost`` (session USD spend from the backend's usage_update, optional) is
+    forwarded as ``context_cost`` when it is a real finite number > 0.
 
     Returns ``{}`` when there is nothing worth showing — no usable pct, and no
     window either. A 0% reading with no tokens is indistinguishable from a
@@ -736,6 +741,9 @@ def _context_reading(pct: Any, used: Any, window: Any, *, stale: bool) -> dict[s
         fields["context_window_tokens"] = int(window_num)
         if used_num and not stale:
             fields["context_used_tokens"] = int(used_num)
+    cost_num = _finite_number(cost)
+    if cost_num and cost_num > 0:
+        fields["context_cost"] = round(cost_num, 4)
     if not pct_num and "context_window_tokens" not in fields:
         return {}
     return fields
@@ -779,12 +787,20 @@ async def _context_snapshot_fields_inner(
 ) -> dict[str, Any]:
     provider = state.sessions.get_provider(effective_session_key(slot))
     if provider is not None:
-        return _context_reading(
+        live = _context_reading(
             provider.context_usage_pct(),
             (provider.context_used_tokens() if hasattr(provider, "context_used_tokens") else 0),
             (provider.context_window_tokens() if hasattr(provider, "context_window_tokens") else 0),
             stale=False,
+            cost=(provider.session_cost() if hasattr(provider, "session_cost") else None),
         )
+        if live:
+            return live
+        # Resident but silent: resumed on load (session/load), so no
+        # usage_update has fired yet and the handle has no reading of its
+        # own. Fall through to the persisted snapshot — it describes the
+        # session up to its last turn, and this process's first turn
+        # overwrites it with measured truth.
     # Readings from a previous process live in a file, so the first read is
     # disk IO — off the event loop, since this handler serves every chat open.
     await asyncio.to_thread(state.ensure_context_snapshots_loaded)
@@ -798,6 +814,9 @@ async def _context_snapshot_fields_inner(
         snapshot.get("used_tokens"),
         snapshot.get("window_tokens"),
         stale=True,
+        # Cost was mirrored into the snapshot by broadcast_context_usage,
+        # so Spent survives a restart/expiry like the bar does.
+        cost=snapshot.get("cost"),
     )
 
 
@@ -2949,6 +2968,34 @@ def _wire_model_id(provider: AcpProvider, model_name: str) -> str:
         # this session's backend actually advertised it.
         advertised = {m.get("modelId", "") for m in provider.available_models()}
         return "auto" if "auto" in advertised else ""
+    # opencode: the dashboard picker sends the DISPLAY label
+    # (model_name/name), but opencode's set_model wants the
+    # ``provider/model`` wire id. Resolve the label (or a wire id)
+    # against the session's configOptions model select — value is the
+    # wire id, name the display label (optionally suffixed
+    # "Name (Provider)" by the dashboard catalog).
+    _client = getattr(provider, "_client", None)
+    if _client is not None:
+        _opts = (
+            _client.acp_config_options()
+            if callable(getattr(_client, "acp_config_options", None))
+            else getattr(_client, "_config_options", None)
+        )
+        for _opt in _opts or []:
+            if isinstance(_opt, dict) and _opt.get("id") == "model":
+                for _o in _opt.get("options", []) or []:
+                    if not isinstance(_o, dict):
+                        continue
+                    _val = _o.get("value")
+                    _nm = _o.get("name")
+                    if not _val:
+                        continue
+                    if _val == model_name or (
+                        _nm
+                        and (_nm == model_name or model_name.startswith(f"{_nm} ("))
+                    ):
+                        return str(_val)
+                break
     return model_registry.to_acp_id(model_name)
 
 
@@ -3068,6 +3115,112 @@ def _broadcast_context_reset(state: "DashboardState", slot_key: str, provider: A
         logger.exception("Failed to broadcast context_usage reset for slot %s", slot_key)
 
 
+_OPENCODE_MODEL_CATALOG: tuple[dict[str, str], float] | None = None
+_OPENCODE_MODEL_CATALOG_TTL = 300.0
+
+
+async def _opencode_model_catalog() -> dict[str, str]:
+    """label/wire -> wire id map from ``opencode models --verbose`` (cached)."""
+    global _OPENCODE_MODEL_CATALOG
+    _now = time.time()
+    if (
+        _OPENCODE_MODEL_CATALOG is not None
+        and _now - _OPENCODE_MODEL_CATALOG[1] < _OPENCODE_MODEL_CATALOG_TTL
+    ):
+        return _OPENCODE_MODEL_CATALOG[0]
+    _bin = "/home/harsh-amin/.opencode/bin/opencode"
+    _PROVIDER_DISPLAY = {
+        "opencode": "OpenCode",
+        "opencode-go": "OpenCode Go",
+        "deepseek": "DeepSeek",
+        "openai": "OpenAI",
+        "groq": "Groq",
+        "moonshotai": "Moonshot AI",
+        "github-copilot": "GitHub Copilot",
+    }
+    _mapping: dict[str, str] = {}
+    try:
+        import json as _json
+        import subprocess as _subprocess
+
+        from kiro_crew.sandbox import create_subprocess_limited
+
+        _proc = await create_subprocess_limited(
+            _bin,
+            "models",
+            "--verbose",
+            stdout=_subprocess.PIPE,
+            stderr=_subprocess.PIPE,
+            start_new_session=True,
+        )
+        try:
+            _out, _err = await asyncio.wait_for(_proc.communicate(), timeout=15)
+        except asyncio.TimeoutError:
+            try:
+                _proc.kill()
+            except ProcessLookupError:
+                pass
+            await _proc.communicate()
+            return _mapping
+        if _proc.returncode != 0 or not _out.strip():
+            return _mapping
+        _buf = ""
+        for _line in _out.decode(errors="replace").splitlines():
+            if _line.lstrip().startswith("{"):
+                _buf = _line
+                continue
+            if _buf:
+                _buf += "\n" + _line
+                try:
+                    _m = _json.loads(_buf)
+                except _json.JSONDecodeError:
+                    continue
+                _buf = ""
+                if not isinstance(_m, dict):
+                    continue
+                _mid = _m.get("id")
+                _pid = _m.get("providerID")
+                if not isinstance(_mid, str) or not isinstance(_pid, str):
+                    continue
+                _wire = f"{_pid}/{_mid}"
+                _mapping[_wire] = _wire
+                _nm = str(_m.get("name") or _mid)
+                _mapping[_nm] = _wire
+                _mapping[f"{_nm} ({_PROVIDER_DISPLAY.get(_pid, _pid)})"] = _wire
+    except Exception:
+        logger.warning("opencode model catalog resolve failed", exc_info=True)
+    if _mapping:
+        _OPENCODE_MODEL_CATALOG = (_mapping, time.time())
+    return _mapping
+
+
+async def _resolve_wire_model_id(label: str, provider: Any) -> str:
+    """Map a picker display label to opencode's provider/model wire id.
+
+    Prefers the live session's configOptions (value = wire id, name =
+    label); falls back to the cached catalog for cold sessions.
+    """
+    if provider is not None:
+        _client = getattr(provider, "_client", None)
+        if _client is not None:
+            _opts = (
+                _client.acp_config_options()
+                if callable(getattr(_client, "acp_config_options", None))
+                else getattr(_client, "_config_options", None)
+            )
+            for _opt in _opts or []:
+                if isinstance(_opt, dict) and _opt.get("id") == "model":
+                    for _o in _opt.get("options", []) or []:
+                        if not isinstance(_o, dict):
+                            continue
+                        _val = _o.get("value")
+                        _nm = _o.get("name")
+                        if _val and _nm and (_nm == label or label.startswith(f"{_nm} (")):
+                            return str(_val)
+                    break
+    return (await _opencode_model_catalog()).get(label, "")
+
+
 async def api_chat_slot_model(request: web.Request) -> web.Response:
     """POST /api/chat/slots/{slot}/model — set model for a chat slot.
 
@@ -3089,10 +3242,23 @@ async def api_chat_slot_model(request: web.Request) -> web.Response:
     if reason:
         logger.warning("Slot %s model rejected: %s", name, reason)
         return web.json_response({"error": reason}, status=400)
-    if slot.model == model_name:
-        return web.json_response({"ok": True, "model": model_name})
     session_key = _history_key_for(name)
     provider = state.sessions.get_provider(session_key)
+    # opencode: slot.model stores the DISPLAY LABEL the picker sent — the
+    # frontend's "offered" list is label-keyed (model_name), so a wire id
+    # here would render the pin "not offered". Every set_model boundary
+    # resolves label -> wire id via configOptions (resolve_opencode_wire_id).
+    if model_name and model_name != "auto":
+        if "/" in model_name:
+            # A wire id came in directly (API call): store its label so the
+            # frontend still recognizes the pin. Reverse lookup over the
+            # catalog; unknown wire ids pass through unchanged.
+            for _k, _v in (await _opencode_model_catalog()).items():
+                if _v == model_name and _k != model_name and " (" in _k:
+                    model_name = _k
+                    break
+    if slot.model == model_name:
+        return web.json_response({"ok": True, "model": model_name})
     prior_model = slot.model
     slot.model = model_name
     try:
