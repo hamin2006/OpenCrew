@@ -47,6 +47,8 @@ from kiro_crew.platform import (
     RESERVED_SLOTS,
     PlatformCompositionError,
     build_default_context,
+    reset_context,
+    set_context,
 )
 from kiro_crew.platform.context import (
     _RESERVED_DEFAULT_ADAPTERS,
@@ -58,6 +60,7 @@ from kiro_crew.platform.governance import (
     CAPABILITY,
     SCOPE_CATALOG,
     parse_policy,
+    parse_profile,
     resolve,
 )
 
@@ -652,3 +655,71 @@ class TestAgentIdentitySeam:
             )
             decision = resolve(ceiling, None, "capabilities.agentcore", "")
             assert decision.permitted, f"posture={posture!r} must remain enabled"
+
+    def test_agent_identity_known_posture_is_stored_on_ceiling(self) -> None:
+        from kiro_crew.platform.governance import agentcore_posture
+
+        for posture in ("workload", "login"):
+            ceiling = parse_policy(
+                _agentcore_policy_body(agentcore={"enabled": True, "posture": posture})
+            )
+            assert agentcore_posture(ceiling) == posture
+
+    def test_agent_identity_omitted_capability_has_no_stored_posture(self) -> None:
+        from kiro_crew.platform.governance import agentcore_posture
+
+        ceiling = parse_policy(_agentcore_policy_body())
+        assert agentcore_posture(ceiling) is None
+        assert agentcore_posture(None) is None
+
+    def test_agent_identity_disabled_row_does_not_require_posture(self) -> None:
+        from kiro_crew.platform.governance import agentcore_posture
+
+        ceiling = parse_policy(_agentcore_policy_body(agentcore={"enabled": False}))
+        assert not resolve(ceiling, None, "capabilities.agentcore", "").permitted
+        assert agentcore_posture(ceiling) is None
+
+    def test_agent_identity_fail_closed_disabled_has_no_stored_posture(self) -> None:
+        from kiro_crew.platform.governance import agentcore_posture
+
+        ceiling = parse_policy(
+            _agentcore_policy_body(fail_closed=False, agentcore={"enabled": True})
+        )
+        assert agentcore_posture(ceiling) is None
+
+    def test_agent_identity_profile_enabled_without_posture_fails_closed(self) -> None:
+        with pytest.raises(PlatformCompositionError, match="posture"):
+            parse_profile({"name": "host", "capabilities": {"agentcore": {"enabled": True}}})
+
+    def test_agent_identity_profile_disabled_row_does_not_require_posture(self) -> None:
+        profile = parse_profile({"name": "host", "capabilities": {"agentcore": {"enabled": False}}})
+        gate = profile.controls["capabilities.agentcore"]
+        assert gate.enabled is False
+
+    def test_agent_identity_seam_stays_off_when_capability_is_off(self) -> None:
+        """Adapter-on is not enough: capability off / no posture keeps the seam off."""
+        from kiro_crew.agent import _agent_identity_enabled
+        from kiro_crew.platform.defaults import DefaultAgentIdentityProvider
+
+        class _ForcedOn(DefaultAgentIdentityProvider):
+            def enabled(self) -> bool:
+                return True
+
+        base = build_default_context(KiroCrewConfig())
+        off_ceiling = parse_policy(_agentcore_policy_body(agentcore={"enabled": False}))
+        on_ceiling = parse_policy(
+            _agentcore_policy_body(agentcore={"enabled": True, "posture": "workload"})
+        )
+        try:
+            set_context(dataclasses.replace(base, agent_identity=_ForcedOn(), governance=None))
+            assert _agent_identity_enabled() is False
+            set_context(
+                dataclasses.replace(base, agent_identity=_ForcedOn(), governance=off_ceiling)
+            )
+            assert _agent_identity_enabled() is False
+            set_context(
+                dataclasses.replace(base, agent_identity=_ForcedOn(), governance=on_ceiling)
+            )
+            assert _agent_identity_enabled() is True
+        finally:
+            reset_context()

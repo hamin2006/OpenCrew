@@ -1249,14 +1249,29 @@ Display-only union — it does not widen enforcement.
 `capabilities.agentcore` is a `CapabilityGate` (opt-in: `capability_default=False`,
 like `capabilities.publish` / `capabilities.messaging`). It is a catalog data row
 only — the evaluator is untouched. The inner `posture` field is policy data, not
-a second scope: `workload` (unattended sessions may vend a workload access token)
-or `login` (a human must be present; unattended sessions get no Gateway inbound
-JWT). An `enabled: true` document with a missing or unknown `posture` fails
-closed — the row is treated as disabled, or boot aborts when `boot.fail_closed`.
-The public `DefaultAgentIdentityProvider` is disabled, so a standalone host with
-no policy is unchanged. Later work consults this row at rebuild / Gateway
-injection; naming it here is what lets a policy pin the capability before those
-chokepoints land.
+a second scope and not a `CapabilityGate` field (`additionalProperties: false`
+stays `enabled` + `scopes`): `workload` (unattended sessions may vend a workload
+access token) or `login` (a human must be present; unattended sessions get no
+Gateway inbound JWT). An `enabled: true` document with a missing or unknown
+`posture` fails closed — the row is treated as disabled, or boot aborts when
+`boot.fail_closed`. A disabled or omitted row does not require `posture`.
+
+The composed posture is a **policy-only** ceiling side field
+(`GovernanceCeiling.agentcore_identity_posture`, Rule 6 — same shape as Slack
+`channels.posture` and `updates`). A profile may enable or disable the
+capability (tightest-wins on `enabled`) but cannot compose a different posture
+onto the ceiling (policy-wins). Read it through the public helper
+`agentcore_posture(ceiling) -> "workload" | "login" | None` — do not re-parse
+raw policy JSON. The helper returns the stored posture only when the capability
+is enabled with a known value; `None` when the ceiling is missing, the
+capability is omitted, disabled, or fail-closed-disabled.
+
+Consumption ANDs three conjuncts: the `agent_identity` adapter is on, governance
+permits `capabilities.agentcore`, and `agentcore_posture(ceiling)` is a known
+value. The public `DefaultAgentIdentityProvider` is disabled, so a standalone
+host with no policy is unchanged. Later work consults this row at rebuild /
+Gateway injection; naming it here is what lets a policy pin the capability
+before those chokepoints land.
 
 `capabilities.publish` is a `CapabilityGate` (opt-in: `capability_default=False`)
 with an inner `destinations` `ScopedRuleset` (`identifier` matcher) bounding

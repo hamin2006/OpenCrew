@@ -79,9 +79,11 @@ from kiro_crew.platform import redact_via_context as redact
 from kiro_crew.platform import safe_context_call
 from kiro_crew.platform.governance import (
     CU_MCP_SERVER,
+    agentcore_posture,
     may_skip_gate_now,
     strip_ungoverned_auto_approve,
 )
+from kiro_crew.platform.governance_profiles import governance_permits
 from kiro_crew.security import is_sensitive_path
 from kiro_crew.sel import (  # circular import: sel imports config which imports agent
     SecurityEvent,
@@ -858,15 +860,47 @@ def _extra_mcp_servers() -> dict[str, dict]:
 def _agent_identity_enabled() -> bool:
     """Whether the composed agent-identity seam is on.
 
-    Standalone Default returns False, so rebuild stays byte-identical. A
-    transient adapter error degrades to False (never to enabled) via
-    ``safe_context_call``. ``PlatformCompositionError`` still aborts.
+    True only when the adapter is on AND governance permits
+    ``capabilities.agentcore`` AND the ceiling stores a known posture.
+    Standalone Default returns False without consulting governance, so
+    rebuild stays byte-identical. An omitted capability is ungoverned
+    (permitted), so the known-posture conjunct is what keeps a forced-on
+    adapter off when no row is present. A transient adapter/governance
+    error degrades to False (never to enabled) via ``safe_context_call``.
+    ``PlatformCompositionError`` still aborts.
     """
-    return bool(
+    adapter_on = bool(
         safe_context_call(
             lambda: current_context().agent_identity.enabled(),
             fallback=False,
             log_message="agent_identity.enabled lookup failed; treating as disabled",
+        )
+    )
+    if not adapter_on:
+        return False
+    permitted = bool(
+        safe_context_call(
+            lambda: getattr(
+                governance_permits(
+                    "capabilities.agentcore",
+                    "",
+                    fail_closed=True,
+                    log_warning=False,
+                ),
+                "permitted",
+                False,
+            ),
+            fallback=False,
+            log_message="agentcore governance lookup failed; treating as disabled",
+        )
+    )
+    if not permitted:
+        return False
+    return bool(
+        safe_context_call(
+            lambda: agentcore_posture(current_context().governance) is not None,
+            fallback=False,
+            log_message="agentcore posture lookup failed; treating as disabled",
         )
     )
 

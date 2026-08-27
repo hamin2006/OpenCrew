@@ -1384,6 +1384,13 @@ class GovernanceCeiling:
     # fallback is still intersected with this ceiling, so it can only ever narrow
     # it — it trades strict fail-closed for keeping the unlisted planes available.
     fallback_profile: "Optional[Profile]" = None
+    # Policy-only composed posture for ``capabilities.agentcore``
+    # (``workload`` | ``login``). Not a CapabilityGate field — that type stays
+    # ``enabled`` + ``scopes``. Read through :func:`agentcore_posture`, which
+    # returns ``None`` when the capability is off, omitted, or fail-closed
+    # disabled. A profile cannot compose a different posture onto this field
+    # (policy-wins).
+    agentcore_identity_posture: Optional[str] = None
 
     def get(self, scope: str) -> Optional[object]:
         return self.controls.get(scope)
@@ -1524,25 +1531,25 @@ def _apply_agentcore_posture(
     data: Mapping[str, object],
     controls: Dict[str, object],
     boot: "BootControls",
-) -> None:
-    """Fail closed when agentcore is enabled without a known posture.
+) -> Optional[str]:
+    """Validate agentcore posture and return the value to persist on the ceiling.
 
     Missing or unknown ``posture`` with ``enabled: true`` aborts when
     ``boot.fail_closed``; otherwise the row is treated as disabled. Disabled
-    (or unnamed) rows do not require a posture.
+    (or unnamed) rows do not require a posture and yield ``None``.
     """
     raw_caps = data.get("capabilities")
     if not isinstance(raw_caps, dict):
-        return
+        return None
     raw = raw_caps.get("agentcore")
     if not isinstance(raw, dict):
-        return
+        return None
     control = controls.get(_AGENTCORE_SCOPE)
     if not isinstance(control, CapabilityGate) or not control.enabled:
-        return
+        return None
     posture = raw.get("posture")
-    if posture in _AGENTCORE_POSTURES:
-        return
+    if isinstance(posture, str) and posture in _AGENTCORE_POSTURES:
+        return posture
     reason = (
         f"capabilities.agentcore is enabled but posture is {posture!r}; "
         "expected 'workload' or 'login'"
@@ -1550,6 +1557,26 @@ def _apply_agentcore_posture(
     if boot.fail_closed:
         raise PlatformCompositionError(reason)
     controls[_AGENTCORE_SCOPE] = CapabilityGate(enabled=False, scopes=control.scopes)
+    return None
+
+
+def agentcore_posture(ceiling: Optional[GovernanceCeiling]) -> Optional[str]:
+    """Return the policy posture if ``capabilities.agentcore`` is enabled.
+
+    ``\"workload\"`` or ``\"login\"`` when the ceiling enables the capability
+    with a known posture. ``None`` when there is no ceiling, the capability is
+    omitted, disabled, or fail-closed-disabled. The single reader later work
+    must use — do not re-parse raw policy JSON for this field.
+    """
+    if ceiling is None:
+        return None
+    stored = ceiling.agentcore_identity_posture
+    if stored not in _AGENTCORE_POSTURES:
+        return None
+    control = ceiling.controls.get(_AGENTCORE_SCOPE)
+    if not isinstance(control, CapabilityGate) or not control.enabled:
+        return None
+    return stored
 
 
 def _parse_control(scope: str, spec: ScopeSpec, raw: object, *, is_policy: bool) -> object:
@@ -1801,7 +1828,7 @@ def parse_policy(
         fail_closed=bool(boot_raw.get("fail_closed", True)),
     )
     controls = _parse_controls(data, is_policy=True)
-    _apply_agentcore_posture(data, controls, boot)
+    composed_posture = _apply_agentcore_posture(data, controls, boot)
     identity = data.get("identity") or {}
     issuer = str(identity.get("issuer", "")) if isinstance(identity, dict) else ""
     signature = str(identity.get("signature", "")) if isinstance(identity, dict) else ""
@@ -1845,6 +1872,7 @@ def parse_policy(
         signature_state=signature_state,
         updates=UpdatePins.from_dict(raw_updates or {}),
         fallback_profile=fallback_profile,
+        agentcore_identity_posture=composed_posture,
     )
 
 
@@ -2975,6 +3003,7 @@ __all__ = [
     "deny_all_profile",
     "parse_policy",
     "parse_profile",
+    "agentcore_posture",
     "load_security_policy",
     "resolve",
     "resolve_pinned_commands",
