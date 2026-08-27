@@ -267,6 +267,21 @@ from kiro_crew.dashboard.chat_utils import (  # noqa: E402
 )
 
 
+def _dashboard_local_owner() -> str:
+    """OSS dashboard owner when ``state.owner_id`` is unset.
+
+    RFC surface table: dashboard (token auth) is ``dashboard+{local_owner}``.
+    ``getpass.getuser()`` is the host principal; a failure leaves the
+    principal unbound rather than inventing an id.
+    """
+    try:
+        import getpass
+
+        return getpass.getuser() or ""
+    except Exception:
+        return ""
+
+
 def _empty_auto_continue_enabled() -> bool:
     """Config gate for the empty-response auto-continue rung (default ON —
     the recovery is bounded to one nudge per user message and always
@@ -5353,7 +5368,16 @@ async def _run_chat(
 
         # Publish this turn's session identity so managed MCP tools resolve
         # X-Session-Key; one shared writer lives in messaging.identity.
-        await publish_turn_identity(state.sessions, session_key)
+        # Also the AgentCore principal hook: dashboard surface + the already-
+        # known owner (or the local OS user on OSS token auth). Never a
+        # client-supplied userId.
+        _principal_raw_id = state.owner_id or _dashboard_local_owner()
+        await publish_turn_identity(
+            state.sessions,
+            session_key,
+            surface="dashboard",
+            raw_id=_principal_raw_id,
+        )
 
         # ── @prompt expansion: resolve @name to SOP/prompt content ──
         # Captured BEFORE any expansion: `@prompt` replaces `message` and
