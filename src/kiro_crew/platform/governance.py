@@ -1515,15 +1515,23 @@ _AGENTCORE_SCOPE = "capabilities.agentcore"
 _AGENTCORE_POSTURES = frozenset({"workload", "login"})
 
 
-def _capability_raw_for_gate(scope: str, raw: Mapping[str, object]) -> Mapping[str, object]:
+def _capability_raw_for_gate(
+    scope: str, raw: Mapping[str, object], *, is_policy: bool
+) -> Mapping[str, object]:
     """Drop inner policy data that is not a CapabilityGate field.
 
     ``capabilities.agentcore.posture`` is policy data, not a second scope and
-    not an evaluator input. Strip it so ``CapabilityGate.from_dict`` stays
-    ``additionalProperties: false`` for every other capability.
+    not an evaluator input. Strip it on a policy document so
+    ``CapabilityGate.from_dict`` stays ``additionalProperties: false``. A
+    profile (or policy fallback body) that carries ``posture`` is rejected —
+    Rule 6, same fail-closed raise as ``ScopedMap.posture``.
     """
     if scope != _AGENTCORE_SCOPE or "posture" not in raw:
         return raw
+    if not is_policy:
+        raise PlatformCompositionError(
+            "capabilities.agentcore.posture is policy-only; not allowed on a profile"
+        )
     return {key: value for key, value in raw.items() if key != "posture"}
 
 
@@ -1595,7 +1603,7 @@ def _parse_control(scope: str, spec: ScopeSpec, raw: object, *, is_policy: bool)
             raise PlatformCompositionError(f"ordinal scope {scope!r} needs a string value")
         return OrdinalControl(scale=spec.ordinal_scale, value=value)
     if spec.kind == CAPABILITY:
-        gate_raw: Mapping[str, object] = _capability_raw_for_gate(scope, raw)
+        gate_raw: Mapping[str, object] = _capability_raw_for_gate(scope, raw, is_policy=is_policy)
         return CapabilityGate.from_dict(
             gate_raw, default_enabled=spec.capability_default, scope_matchers=spec.scope_matchers
         )
@@ -1861,7 +1869,6 @@ def parse_policy(
                 "it is a controls-only profile body"
             )
         fallback_controls = _parse_controls(raw_fallback, is_policy=False)
-        _apply_agentcore_posture(raw_fallback, fallback_controls, boot)
         fallback_profile = Profile(name="_fallback", controls=fallback_controls)
     return GovernanceCeiling(
         version=POLICY_VERSION,
@@ -1928,10 +1935,6 @@ def parse_profile(data: Mapping[str, object]) -> Profile:
     # whole profile. Any other unknown child still raises. See _parse_controls.
     unknown: List[str] = []
     controls = _parse_controls(data, is_policy=False, unknown_out=unknown, profile_name=name)
-    # A profile that enables agentcore without a known posture is indistinguishable
-    # from a misconfigured ceiling: fail closed (the loader turns this raise
-    # into the deny-all fallback).
-    _apply_agentcore_posture(data, controls, BootControls(fail_closed=True))
     return Profile(
         name=name,
         bind=bind,

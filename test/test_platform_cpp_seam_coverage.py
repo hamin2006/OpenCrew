@@ -687,9 +687,26 @@ class TestAgentIdentitySeam:
         )
         assert agentcore_posture(ceiling) is None
 
-    def test_agent_identity_profile_enabled_without_posture_fails_closed(self) -> None:
+    def test_agent_identity_profile_enabled_without_posture_parses(self) -> None:
+        """A profile may toggle enabled; posture is policy-only and not required."""
+        from kiro_crew.platform.governance import CapabilityGate
+
+        profile = parse_profile({"name": "host", "capabilities": {"agentcore": {"enabled": True}}})
+        gate = profile.controls["capabilities.agentcore"]
+        assert isinstance(gate, CapabilityGate)
+        assert gate.enabled is True
+
+    def test_agent_identity_profile_carrying_posture_is_rejected(self) -> None:
+        """Carrying posture on a profile is a silent lie — reject like ScopedMap.posture."""
         with pytest.raises(PlatformCompositionError, match="posture"):
-            parse_profile({"name": "host", "capabilities": {"agentcore": {"enabled": True}}})
+            parse_profile(
+                {
+                    "name": "host",
+                    "capabilities": {
+                        "agentcore": {"enabled": True, "posture": "login"},
+                    },
+                }
+            )
 
     def test_agent_identity_profile_disabled_row_does_not_require_posture(self) -> None:
         profile = parse_profile({"name": "host", "capabilities": {"agentcore": {"enabled": False}}})

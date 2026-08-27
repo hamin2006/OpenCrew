@@ -1259,8 +1259,11 @@ Gateway inbound JWT). An `enabled: true` document with a missing or unknown
 The composed posture is a **policy-only** ceiling side field
 (`GovernanceCeiling.agentcore_identity_posture`, Rule 6 — same shape as Slack
 `channels.posture` and `updates`). A profile may enable or disable the
-capability (tightest-wins on `enabled`) but cannot compose a different posture
-onto the ceiling (policy-wins). Read it through the public helper
+capability (tightest-wins on `enabled`) but cannot carry `posture`: that key is
+rejected at parse, the same fail-closed raise as `ScopedMap.posture` /
+`updates` / `fallback`. Enable-without-posture is the legal profile shape; it
+cannot turn the seam on alone, because an omitted policy has no stored
+posture. Read the composed value through the public helper
 `agentcore_posture(ceiling) -> "workload" | "login" | None` — do not re-parse
 raw policy JSON. The helper returns the stored posture only when the capability
 is enabled with a known value; `None` when the ceiling is missing, the
