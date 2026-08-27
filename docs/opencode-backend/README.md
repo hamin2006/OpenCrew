@@ -1,9 +1,13 @@
-# opencode-backend
+# Opencrew — opencode-backend
 
 Run the **Kiro Crew** dashboard and messaging channels on top of
 **[opencode](https://opencode.ai)** instead of kiro-cli — a fully self-hosted
-agent backend on the model stack of your choice (this fork is built and tested
-on DeepSeek via the opencode provider).
+agent backend on the model stack of your choice (built and tested on DeepSeek
+via the opencode provider).
+
+> Opencrew is a fork of [kirodotdev/KiroCrew](https://github.com/kirodotdev/KiroCrew)
+> whose `main` branch is this opencode backend (based on v0.3.0). Sync upstream
+> changes with `git fetch upstream && git merge upstream/main`.
 
 ```
 Kiro Crew gateway  ── ACP (Agent Client Protocol) ──►  opencode acp  ──►  deepseek API
@@ -65,10 +69,10 @@ curl -fsSL https://download.crew.kiro.dev/cli.sh | sh
 
 ## Getting it up and running
 
-### 1. Clone this branch
+### 1. Clone Opencrew (main is the opencode backend)
 
 ```sh
-git clone -b opencode-backend https://github.com/hamin2006/KiroCrew.git ~/KiroCrew
+git clone https://github.com/hamin2006/Opencrew.git ~/KiroCrew
 cd ~/KiroCrew
 git remote add upstream https://github.com/kirodotdev/KiroCrew.git
 ```
