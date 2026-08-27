@@ -1597,6 +1597,7 @@ export interface LaunchJob {
   profile: string
   region: string
   size_key: string
+  agentcore_posture?: 'none' | 'workload' | 'login'
   tag: string
   status: LaunchJobStatus
   steps: LaunchStep[]
@@ -2116,7 +2117,12 @@ export const api = {
     }>
   },
   cloudLaunches: () => get('/api/cloud/launch').then(j) as Promise<{ jobs: LaunchJob[] }>,
-  cloudLaunch: (body: { profile: string; region: string; size_key: string }) =>
+  cloudLaunch: (body: {
+    profile: string
+    region: string
+    size_key: string
+    agentcore_posture?: 'none' | 'workload' | 'login'
+  }) =>
     post('/api/cloud/launch', body).then(j) as Promise<LaunchJob>,
   cloudLaunchStatus: (id: string) =>
     get('/api/cloud/launch/' + encodeURIComponent(id)).then(j) as Promise<LaunchJob>,

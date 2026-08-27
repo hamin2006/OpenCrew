@@ -288,7 +288,10 @@ async def api_cloud_launch_get(request: web.Request) -> web.Response:
 
 
 async def api_cloud_launch_create(request: web.Request) -> web.Response:
-    """POST /api/cloud/launch — start a launch job. Body: {profile, region, size_key}."""
+    """POST /api/cloud/launch — start a launch job.
+
+    Body: {profile, region, size_key, agentcore_posture?}.
+    """
     denied = _guard(request, "launch_create")
     if denied is not None:
         return denied
@@ -302,6 +305,18 @@ async def api_cloud_launch_create(request: web.Request) -> web.Response:
             {"error": "body must be an object", "code": "invalid_body"}, status=400
         )
     size_key = str(body.get("size_key") or "").strip()
+    try:
+        agentcore_posture = iam.normalize_agentcore_posture(
+            str(body.get("agentcore_posture") or "none")
+        )
+    except ValueError:
+        return web.json_response(
+            {
+                "error": "agentcore_posture must be none, workload, or login",
+                "code": "invalid_agentcore_posture",
+            },
+            status=400,
+        )
     # One launch at a time. Without this a double-click or a retried request
     # creates two jobs with two tags and two CloudFormation stacks — two billed
     # instances, and the client cannot undo that after the fact. The check, the
@@ -331,6 +346,7 @@ async def api_cloud_launch_create(request: web.Request) -> web.Response:
                     profile=str(body.get("profile", "")),
                     region=str(body.get("region", "")),
                     size_key=size_key,
+                    agentcore_posture=agentcore_posture,
                 )
             )
         except KeyError as e:  # unknown size

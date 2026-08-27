@@ -53,17 +53,25 @@ BOUNDARY_NAME_PREFIX = BOUNDARY_NAME
 _KNOWN_BOUNDARY_NAMES = frozenset({BOUNDARY_NAME, AGENTCORE_BOUNDARY_NAME})
 
 # Fleet-pinned AgentCore ARNs. Instance-fragment Allows never use ``*``;
-# explicit Deny SIDs may. Workload name ``kirocrew``, gateway ``kirocrew-*``.
+# explicit Deny SIDs may. A CloudFormation launch names the standalone
+# identity ``kirocrew-<StackTag>``; a hand-rolled fleet may still use
+# ``kirocrew``. Gateway ``kirocrew-*``.
 _AGENTCORE_WORKLOAD_DIR_ARN = "arn:aws:bedrock-agentcore:*:*:workload-identity-directory/default"
 _AGENTCORE_WORKLOAD_ID_ARN = (
     "arn:aws:bedrock-agentcore:*:*:workload-identity-directory/default/"
     "workload-identity/kirocrew"
 )
+_AGENTCORE_WORKLOAD_ID_WILDCARD_ARN = (
+    "arn:aws:bedrock-agentcore:*:*:workload-identity-directory/default/"
+    "workload-identity/kirocrew-*"
+)
 _AGENTCORE_GATEWAY_ARN = "arn:aws:bedrock-agentcore:*:*:gateway/kirocrew-*"
 _AGENTCORE_WORKLOAD_RESOURCES = [
     _AGENTCORE_WORKLOAD_DIR_ARN,
     _AGENTCORE_WORKLOAD_ID_ARN,
+    _AGENTCORE_WORKLOAD_ID_WILDCARD_ARN,
 ]
+_AGENTCORE_LAUNCH_POSTURES = frozenset({"none", "workload", "login"})
 _AGENTCORE_ALL_ACTIONS = [
     "bedrock-agentcore:GetWorkloadAccessToken",
     "bedrock-agentcore:GetWorkloadAccessTokenForUserId",
@@ -166,12 +174,36 @@ def boundary_policy_json(account: str = "*") -> str:
     return json.dumps(boundary_policy_document(account))
 
 
+def normalize_agentcore_posture(value: str | None) -> str:
+    """Return ``none``, ``workload``, or ``login``. Empty becomes ``none``."""
+    raw = (value or "none").strip().lower()
+    if raw not in _AGENTCORE_LAUNCH_POSTURES:
+        raise ValueError(f"unknown agentcore posture: {value!r}; expected none, workload, or login")
+    return raw
+
+
+def agentcore_workload_name(tag: str, posture: str) -> str:
+    """Standalone AgentCore identity name CloudFormation will create.
+
+    Empty when ``posture`` is ``none`` (no identity resource). Otherwise
+    ``kirocrew-<tag>`` so two crews in one account do not collide.
+    """
+    if normalize_agentcore_posture(posture) == "none":
+        return ""
+    cleaned = (tag or "").strip()
+    if not cleaned:
+        raise ValueError("agentcore workload name requires a stack tag")
+    return f"kirocrew-{cleaned}"
+
+
 def agentcore_instance_policy_document(posture: str) -> dict[str, Any]:
     """Instance-role fragment for ``capabilities.agentcore.posture``.
 
     This is the labeled sibling of :func:`policy_document` — paste it onto the
-    *instance* role, never the launch principal. Resource ARNs are fleet-pinned
-    (workload ``kirocrew``, gateway ``kirocrew-*``) except on explicit Deny SIDs.
+    *instance* role, never the launch principal. A CloudFormation launch
+    attaches the same verbs automatically. Resource ARNs are fleet-pinned
+    (workload ``kirocrew`` / ``kirocrew-*``, gateway ``kirocrew-*``) except
+    on explicit Deny SIDs.
     """
     if posture not in _INSTANCE_POSTURES:
         raise ValueError(
@@ -616,6 +648,24 @@ def policy_document() -> dict[str, Any]:
             "Action": ["iam:TagRole"],
             "Resource": f"arn:aws:iam::*:role/{ROLE_NAME_PREFIX}*",
             "Condition": {"StringEquals": {f"aws:ResourceTag/{MANAGED_TAG_KEY}": "true"}},
+        },
+        {
+            # CloudFormation creates AWS::BedrockAgentCore::WorkloadIdentity on
+            # an AgentCore launch. These are CONTROL-PLANE verbs for the
+            # launch principal — not InvokeGateway / GetWorkloadAccessToken*
+            # (those stay on the instance role). Scoped to kirocrew / kirocrew-*.
+            "Sid": "AgentCoreWorkloadIdentityControlPlane",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock-agentcore:CreateWorkloadIdentity",
+                "bedrock-agentcore:DeleteWorkloadIdentity",
+                "bedrock-agentcore:GetWorkloadIdentity",
+                "bedrock-agentcore:UpdateWorkloadIdentity",
+                "bedrock-agentcore:TagResource",
+                "bedrock-agentcore:UntagResource",
+                "bedrock-agentcore:ListTagsForResource",
+            ],
+            "Resource": list(_AGENTCORE_WORKLOAD_RESOURCES),
         },
         {
             # The SHARED, IMMUTABLE instance permissions boundary. The launcher

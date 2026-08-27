@@ -39,6 +39,7 @@ def _deploy_with_progress(
     region: str,
     subnet_id: str = "",
     disable_rollback: bool = False,
+    agentcore_posture: str = "none",
 ) -> ec2.DeployResult:
     """Run ``ec2.deploy`` while streaming live CloudFormation + bootstrap logs.
 
@@ -64,6 +65,7 @@ def _deploy_with_progress(
                 region=region,
                 subnet_id=subnet_id,
                 disable_rollback=disable_rollback,
+                agentcore_posture=agentcore_posture,
                 proc_sink=lambda p: deploy_proc.__setitem__("proc", p),
             )
         except BaseException as exc:  # noqa: BLE001 - surfaced on join
@@ -312,6 +314,7 @@ def launch(
     force_new: bool = False,
     keep_on_failure: bool = False,
     hold_tunnel: bool = True,
+    agentcore_posture: str = "none",
 ) -> int:
     """Run the full interactive launch flow. Returns a process exit code.
 
@@ -320,7 +323,9 @@ def launch(
     default-VPC preference would otherwise never pick. ``hold_tunnel=False``
     closes the SSM tunnel and returns instead of blocking on it — used when the
     wizard is embedded in a larger flow (``kirocrew setup``) that still has
-    steps to print after this one.
+    steps to print after this one. ``agentcore_posture`` of ``workload`` or
+    ``login`` has CloudFormation create an Amazon Bedrock AgentCore
+    WorkloadIdentity and attach it to the instance.
     """
     cfg = CloudConfig.load()
     profile = profile or cfg.profile
@@ -434,6 +439,12 @@ def launch(
         assert tier is not None
         tag = _new_tag()
         ui.info(f"CloudFormation stack: {ec2.stack_name(tag)}")
+        if agentcore_posture != "none":
+            ui.info(
+                "AgentCore identity: "
+                f"{iam.agentcore_workload_name(tag, agentcore_posture)} "
+                f"({agentcore_posture})"
+            )
         if subnet_id:
             ui.info(f"Subnet: {subnet_id} (explicit --subnet; auto-discovery skipped)")
         # NB: do NOT persist last_tag yet. Saving it BEFORE the deploy succeeds
@@ -453,6 +464,7 @@ def launch(
                 region=region,
                 subnet_id=subnet_id,
                 disable_rollback=keep_on_failure,
+                agentcore_posture=agentcore_posture,
             )
         except AWSError as exc:
             ui.fail(str(exc))

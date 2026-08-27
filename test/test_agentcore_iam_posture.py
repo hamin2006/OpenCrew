@@ -21,6 +21,10 @@ _WORKLOAD_DIR = "arn:aws:bedrock-agentcore:*:*:workload-identity-directory/defau
 _WORKLOAD_ID = (
     "arn:aws:bedrock-agentcore:*:*:workload-identity-directory/default/workload-identity/kirocrew"
 )
+_WORKLOAD_ID_WILDCARD = (
+    "arn:aws:bedrock-agentcore:*:*:workload-identity-directory/default/workload-identity/kirocrew-*"
+)
+_WORKLOAD_RESOURCES = [_WORKLOAD_DIR, _WORKLOAD_ID, _WORKLOAD_ID_WILDCARD]
 _GATEWAY = "arn:aws:bedrock-agentcore:*:*:gateway/kirocrew-*"
 
 # Byte-stable original boundary: SSM-core + source-bucket read, no AgentCore.
@@ -124,6 +128,24 @@ def test_launcher_policy_json_has_no_invoke_gateway() -> None:
     assert "GetWorkloadAccessToken" not in text
 
 
+def test_launcher_policy_can_create_agentcore_identity() -> None:
+    st = _statement_by_sid(iam.policy_document(), "AgentCoreWorkloadIdentityControlPlane")
+    assert st["Effect"] == "Allow"
+    assert "bedrock-agentcore:CreateWorkloadIdentity" in _actions(st)
+    assert "bedrock-agentcore:DeleteWorkloadIdentity" in _actions(st)
+    assert "InvokeGateway" not in "".join(_actions(st))
+    assert "GetWorkloadAccessToken" not in "".join(_actions(st))
+    assert _resources(st) == _WORKLOAD_RESOURCES
+
+
+def test_agentcore_workload_name_is_per_tag() -> None:
+    assert iam.agentcore_workload_name("kc-abc123", "workload") == "kirocrew-kc-abc123"
+    assert iam.agentcore_workload_name("kc-abc123", "login") == "kirocrew-kc-abc123"
+    assert iam.agentcore_workload_name("kc-abc123", "none") == ""
+    assert iam.normalize_agentcore_posture("") == "none"
+    assert iam.normalize_agentcore_posture("WORKLOAD") == "workload"
+
+
 def test_launcher_create_role_accepts_either_boundary() -> None:
     st = _statement_by_sid(iam.policy_document(), "IamCreateRoleWithBoundary")
     cond = st["Condition"]["ArnLike"]["iam:PermissionsBoundary"]
@@ -153,7 +175,7 @@ def test_workload_instance_document_denies_for_jwt() -> None:
         "bedrock-agentcore:GetWorkloadAccessToken",
         "bedrock-agentcore:GetWorkloadAccessTokenForUserId",
     }
-    assert _resources(identity) == [_WORKLOAD_DIR, _WORKLOAD_ID]
+    assert _resources(identity) == _WORKLOAD_RESOURCES
 
     gateway = _statement_by_sid(doc, "AgentCoreGateway")
     assert gateway["Effect"] == "Allow"
@@ -175,7 +197,7 @@ def test_login_instance_document_denies_userid_and_invoke() -> None:
     identity = _statement_by_sid(doc, "AgentCoreIdentityForJwt")
     assert identity["Effect"] == "Allow"
     assert _actions(identity) == {"bedrock-agentcore:GetWorkloadAccessTokenForJWT"}
-    assert _resources(identity) == [_WORKLOAD_DIR, _WORKLOAD_ID]
+    assert _resources(identity) == _WORKLOAD_RESOURCES
 
     deny = _statement_by_sid(doc, "DenyUserIdAndIamGateway")
     assert deny["Effect"] == "Deny"

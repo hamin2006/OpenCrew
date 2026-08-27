@@ -85,7 +85,7 @@ claim that a hostile in-process agent is fully contained.
 | `config.py` | Persisted profile / region / tag (**never credentials**); `load()` tolerates a hand-edited/corrupt `cloud.json` — bad JSON *or* a non-object shape falls back to defaults rather than crashing every cloud command. |
 | `sizes.py` | arm64/Graviton size tiers (16 GB default `t4g.xlarge`). |
 | `ui.py` / `wizard.py` | Terminal UI + the interactive launch flow. `_deploy_with_progress` runs the blocking deploy on a daemon thread and captures the `aws cloudformation deploy` child via a `proc_sink`, so a Ctrl+C on the main (poll) thread terminates it instead of orphaning it (~1800s). An unknown `--size`/`size_key` on the public `launch()` entrypoint yields a clean rc=1 + message, not an uncaught `KeyError`. Resuming a saved stack (`launch` after `stop`) first calls `_ensure_running_and_ssm_ready` — starts a `stopped` instance and waits for SSM `Online` before sign-in/tunnel (which are SSM-only and would otherwise fail); a `terminated` instance fails clean pointing at `--new`. `last_tag` is persisted (`cfg.save()`) **only after** a deploy confirms healthy — a failed first launch leaves no saved pointer, so the next `launch` retries clean instead of resuming a rolled-back/instance-less stack; `_saved_launch_is_usable` additionally ignores a stale saved tag (from an older build) whose stack is in a `_FAILED_STATES` status or has no instance. |
-| `templates/kirocrew-ec2.yaml` | The CloudFormation stack. |
+| `templates/kirocrew-ec2.yaml` | The CloudFormation stack. `AgentCorePosture=none\|workload\|login` (default `none`) optionally creates `AWS::BedrockAgentCore::WorkloadIdentity` named `kirocrew-<StackTag>` and attaches the matching instance-role grant. CDK operators create the same resource via `aws_bedrockagentcore.WorkloadIdentity`. |
 
 ## Provisioning shape
 
@@ -95,6 +95,15 @@ rollback, one-command `delete-stack` teardown. AMI resolves from the public
 `WaitCondition` + `cfn-signal` blocks the deploy until the gateway is healthy; a
 failed bootstrap folds the on-box setup-log tail into the signal reason so the
 cause survives the rollback.
+
+`kirocrew cloud launch --agentcore-posture workload|login` (and the Settings
+Remote Crew selector) assigns the box an Amazon Bedrock AgentCore identity in
+the same stack: CloudFormation creates a standalone
+`AWS::BedrockAgentCore::WorkloadIdentity`, the instance role receives the
+posture grant, and systemd gets `KIROCREW_AGENTCORE_WORKLOAD_NAME`. Default
+`none` is the historical launch. Destroying the stack deletes the identity.
+The launcher Policy.json grows only the control-plane create/delete/tag
+verbs — never `InvokeGateway`.
 
 The instance bootstrap runs `install.sh --voice` on both its initial attempt and
 retry. This installs the existing `voice` extra (`boto3` and

@@ -57,6 +57,7 @@ def _cloud_launch(args: argparse.Namespace) -> int:
         force_new=getattr(args, "new", False),
         keep_on_failure=getattr(args, "keep_on_failure", False),
         hold_tunnel=getattr(args, "hold_tunnel", True),
+        agentcore_posture=getattr(args, "agentcore_posture", "none") or "none",
     )
 
 

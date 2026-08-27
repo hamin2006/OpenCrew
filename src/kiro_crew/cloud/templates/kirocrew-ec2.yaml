@@ -120,6 +120,22 @@ Parameters:
       when combined with EC2 Instance Connect (which pushes an ephemeral key over
       the AWS API). Empty (default, recommended) = SSM-only: no inbound ports and
       no key material - use `kirocrew cloud connect` (SSM port-forward) instead.
+  AgentCorePosture:
+    Type: String
+    Default: none
+    AllowedValues: [none, workload, login]
+    Description: >-
+      When workload or login, the stack creates an Amazon Bedrock AgentCore
+      standalone WorkloadIdentity and attaches the matching instance-role
+      grant. none (default) is the historical launch with no AgentCore identity.
+  AgentCoreWorkloadName:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^[A-Za-z0-9_.-]{3,255}$"
+    Description: >-
+      Name of the AWS::BedrockAgentCore::WorkloadIdentity the stack creates
+      (kirocrew-<StackTag>). Required when AgentCorePosture is not none; the
+      launcher fills it. Empty on a default launch.
 
 # The AMI is resolved at deploy time from the public SSM Parameter Store alias —
 # never a hardcoded per-region AMI id. Latest Amazon Linux 2023 for the arch.
@@ -136,6 +152,18 @@ Conditions:
   IsArm: !Equals [!Ref Architecture, arm64]
   HasS3Source: !Not [!Equals [!Ref SourceBucket, ""]]
   WantPublicIp: !Equals [!Ref AssociatePublicIp, "true"]
+  HasAgentCore: !Not [!Equals [!Ref AgentCorePosture, "none"]]
+  IsWorkloadPosture: !Equals [!Ref AgentCorePosture, "workload"]
+  IsLoginPosture: !Equals [!Ref AgentCorePosture, "login"]
+
+Rules:
+  AgentCoreNameRequired:
+    RuleCondition: !Not [!Equals [!Ref AgentCorePosture, "none"]]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref AgentCoreWorkloadName, ""]]
+        AssertDescription: >-
+          AgentCoreWorkloadName is required when AgentCorePosture is workload
+          or login. The launcher fills kirocrew-<StackTag>.
 
 Resources:
   # --- IAM: instance role trusts EC2 and gets SSM core (enables Session Manager
@@ -190,6 +218,66 @@ Resources:
     Properties:
       InstanceProfileName: !Sub "kirocrew-ec2-${StackTag}"
       Roles: [!Ref InstanceRole]
+
+  # Standalone AgentCore Identity for this crew. Not Runtime-managed and not
+  # Gateway-managed — those identities cannot call GetWorkloadAccessToken.
+  # Destroying the stack deletes the identity with it.
+  CrewWorkloadIdentity:
+    Type: AWS::BedrockAgentCore::WorkloadIdentity
+    Condition: HasAgentCore
+    Properties:
+      Name: !Ref AgentCoreWorkloadName
+      Tags:
+        - { Key: "kirocrew:managed", Value: "true" }
+        - { Key: "kirocrew:instance", Value: !Ref StackTag }
+
+  AgentCoreWorkloadInstancePolicy:
+    Type: AWS::IAM::Policy
+    Condition: IsWorkloadPosture
+    Properties:
+      PolicyName: AgentCoreIdentityWorkload
+      Roles: [!Ref InstanceRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AgentCoreIdentity
+            Effect: Allow
+            Action:
+              - bedrock-agentcore:GetWorkloadAccessToken
+              - bedrock-agentcore:GetWorkloadAccessTokenForUserId
+            Resource:
+              - !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default"
+              - !GetAtt CrewWorkloadIdentity.WorkloadIdentityArn
+          - Sid: AgentCoreGateway
+            Effect: Allow
+            Action: [bedrock-agentcore:InvokeGateway]
+            Resource: !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/kirocrew-*"
+          - Sid: DenyJwtPathOnWorkloadPosture
+            Effect: Deny
+            Action: bedrock-agentcore:GetWorkloadAccessTokenForJWT
+            Resource: "*"
+
+  AgentCoreLoginInstancePolicy:
+    Type: AWS::IAM::Policy
+    Condition: IsLoginPosture
+    Properties:
+      PolicyName: AgentCoreIdentityLogin
+      Roles: [!Ref InstanceRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AgentCoreIdentityForJwt
+            Effect: Allow
+            Action: [bedrock-agentcore:GetWorkloadAccessTokenForJWT]
+            Resource:
+              - !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default"
+              - !GetAtt CrewWorkloadIdentity.WorkloadIdentityArn
+          - Sid: DenyUserIdAndIamGateway
+            Effect: Deny
+            Action:
+              - bedrock-agentcore:GetWorkloadAccessTokenForUserId
+              - bedrock-agentcore:InvokeGateway
+            Resource: "*"
 
   # --- Security group: no ingress by default (SSM is outbound-only). Egress all
   #     so the box can pull packages, reach SSM, and the kiro-cli/LLM endpoints.
@@ -599,6 +687,8 @@ Resources:
           Environment=PATH=$RUN_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
           # The registry records this port as the instance's remote_port.
           Environment=KIROCREW_PORT=${DashboardPort}
+          Environment=KIROCREW_AGENTCORE_POSTURE=${AgentCorePosture}
+          Environment=KIROCREW_AGENTCORE_WORKLOAD_NAME=${AgentCoreWorkloadName}
 
           [Install]
           WantedBy=multi-user.target
@@ -646,3 +736,11 @@ Outputs:
   StackTag:
     Description: The kirocrew:instance discovery tag value.
     Value: !Ref StackTag
+  AgentCoreWorkloadIdentityName:
+    Condition: HasAgentCore
+    Description: Standalone Amazon Bedrock AgentCore workload identity name.
+    Value: !Ref CrewWorkloadIdentity
+  AgentCoreWorkloadIdentityArn:
+    Condition: HasAgentCore
+    Description: Standalone Amazon Bedrock AgentCore workload identity ARN.
+    Value: !GetAtt CrewWorkloadIdentity.WorkloadIdentityArn

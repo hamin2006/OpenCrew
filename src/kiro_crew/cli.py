@@ -1796,6 +1796,14 @@ Examples:
         action="store_true",
         help="On bootstrap failure, keep the instance (disable rollback) for inspection",
     )
+    _c_launch.add_argument(
+        "--agentcore-posture",
+        default="none",
+        choices=["none", "workload", "login"],
+        help="Create an Amazon Bedrock AgentCore workload identity on launch "
+        "(workload = IAM Gateway at boot; login = JWT after sign-in; "
+        "none = no identity)",
+    )
 
     _c_list = cloud_sub.add_parser("list", help="List your Kiro Crew cloud instances")
     _cloud_creds_opts(_c_list)
