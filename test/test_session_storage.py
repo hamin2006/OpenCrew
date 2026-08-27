@@ -935,6 +935,12 @@ class TestCotenantCache:
     The cache is OPT-IN per call site because the same value gates destructive
     paths; the safety tests below are what stop a later refactor from making it
     global.
+
+    One uncached pass deliberately remains on a default install: ``measure``
+    populates ``reclaim_blocked_reason`` via :func:`reclaim_block_reason`, whose
+    co-tenant read must never opt in (it derives a refusal). The isolated *stores*
+    fixture short-circuits that path, which is why the reuse test below counts 1;
+    the default-home test pins that the gate really does re-read.
     """
 
     @staticmethod
@@ -1040,6 +1046,80 @@ class TestCotenantCache:
             frozenset(),
             (),
         ), "an empty pod root must read as empty, not as the first root's pass"
+
+    def test_a_different_crew_home_is_not_answered_from_an_older_pass(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``KIROCREW_HOME`` alone keys the cache.
+
+        Each map is read through ``hooks.safe_read_file``, whose sensitive-path
+        READ gate re-anchors on the raw ``KIROCREW_HOME`` — the same symlinked
+        map can be refused under one anchoring and readable under another, so a
+        pass taken under one must not answer for the other. Varied ALONE so the
+        term is ratcheted independently, not only as part of a pair.
+        """
+        pod_root = tmp_path / "pods"
+        (pod_root / "wt-x").mkdir(parents=True)
+        monkeypatch.setenv("KIROCREW_POD_ROOT", str(pod_root))
+        monkeypatch.setenv("KIRO_HOME", str(tmp_path / "home-a" / "kiro"))
+        monkeypatch.setenv("KIROCREW_HOME", str(tmp_path / "home-a"))
+        calls = self._count_pod_scans(monkeypatch)
+        session_storage.cotenant_sids(cached=True)
+
+        monkeypatch.setenv("KIROCREW_HOME", str(tmp_path / "home-b"))
+        session_storage.cotenant_sids(cached=True)
+
+        assert calls["n"] == 2, "a changed KIROCREW_HOME must not be served the old pass"
+
+    def test_a_different_kiro_home_is_not_answered_from_an_older_pass(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``KIRO_HOME`` alone keys the cache — defensive over-keying, ratcheted.
+
+        Today the read tier re-anchors on ``KIROCREW_HOME`` only, but the gate's
+        anchor set is keyed on both raw values; keeping ``KIRO_HOME`` in this key
+        means a future read-tier anchor cannot silently start serving stale
+        answers. A spurious miss costs a re-scan; a spurious hit would cost a
+        wrong answer.
+        """
+        pod_root = tmp_path / "pods"
+        (pod_root / "wt-x").mkdir(parents=True)
+        monkeypatch.setenv("KIROCREW_POD_ROOT", str(pod_root))
+        monkeypatch.setenv("KIROCREW_HOME", str(tmp_path / "home-a"))
+        monkeypatch.setenv("KIRO_HOME", str(tmp_path / "home-a" / "kiro"))
+        calls = self._count_pod_scans(monkeypatch)
+        session_storage.cotenant_sids(cached=True)
+
+        monkeypatch.setenv("KIRO_HOME", str(tmp_path / "home-b" / "kiro"))
+        session_storage.cotenant_sids(cached=True)
+
+        assert calls["n"] == 2, "a changed KIRO_HOME must not be served the old pass"
+
+    def test_reclaim_block_reason_rereads_cotenants_despite_a_primed_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The hard reclaim gate must never opt in — and nothing else covered it.
+
+        The isolated *stores* fixture short-circuits :func:`reclaim_block_reason`
+        before its co-tenant read, so the other safety tests never execute that
+        call. This pins the DEFAULT-home posture, where the read actually runs,
+        and asserts a primed cache does not answer it — the ratchet that stops a
+        future perf change from threading ``cached=`` through the gate.
+        """
+        monkeypatch.setenv("KIROCREW_POD_ROOT", str(tmp_path / "pods"))
+        monkeypatch.delenv("KIROCREW_HOME", raising=False)
+        monkeypatch.delenv("KIRO_HOME", raising=False)
+        # Pin the default home rather than clearing the memo; see
+        # TestSharedStoreRefusal for why re-resolving on a real machine is unsafe.
+        monkeypatch.setattr(paths, "_resolved_home", paths._default_home())
+        monkeypatch.setattr(paths, "_config_dir_memo", None)
+
+        session_storage.cotenant_sids(cached=True)  # prime
+        calls = self._count_pod_scans(monkeypatch)
+        session_storage.reclaim_block_reason()
+        session_storage.reclaim_block_reason()
+
+        assert calls["n"] == 2, "the reclaim gate must re-enumerate the pod root on every call"
 
 
 class TestSharedStoreRefusal:
