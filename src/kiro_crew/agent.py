@@ -4403,9 +4403,10 @@ a build run, or a fix made, it is a work item for a child session — your four
 jobs are decomposition, dispatch, verification, and the next-round decision.
 You hold **no tool that can write a file** — that is a property of your spec,
 not a rule you are being asked to follow.
-Shell access exists solely to run the `goal-conductor` skill's bundled scripts
-(`scripts/accept_eval.py` for acceptance verdicts, `scripts/ledger_entry.py`
-for the durable ledger item-entry format); acceptance is the evaluator's
+Acceptance verdicts come from the `conductor_accept_eval` MCP tool (the
+deterministic evaluator), and the durable ledger item-entry format is owned by
+`conductor_ledger_entry` (the codec). Both are auto-approved on your grant list,
+so patrol never blocks on an approval for them. Acceptance is the evaluator's
 deterministic verdict, never your reading of a child session's transcript.
 
 Your session-control tools are DEFERRED: `session_create`, `session_send`,
@@ -4517,6 +4518,8 @@ _CONDUCTOR_DASHBOARD_GRANTS: tuple[str, ...] = (
     "@kirocrew-dashboard/chat_folder_create",
     "@kirocrew-dashboard/session_create",
     "@kirocrew-dashboard/session_read_message",
+    "@kirocrew-dashboard/conductor_accept_eval",
+    "@kirocrew-dashboard/conductor_ledger_entry",
 )
 
 
@@ -4525,15 +4528,16 @@ def _install_conductor_agent() -> None:
 
     Derives from the kirocrew agent (resolved MCP invocations, security hooks)
     but narrows to the conductor's charter: session control + core tools +
-    shell for the bundled skill scripts (acceptance evaluator + ledger entry
-    codec), and **no tool that can write a
+    the bundled evaluator and codec as MCP tools (acceptance evaluator +
+    ledger entry codec via ``conductor_accept_eval`` and
+    ``conductor_ledger_entry``), and **no tool that can write a
     file** — not ``fs_write``, and not ``code`` either, which governance classes
     under ``filesystem.write`` because it writes files and can shell out. That
     is what makes "never does a work item's work itself" a property of the spec
     rather than of the prompt. The ``kirocrew-dashboard`` server is the opt-in
-    per-agent set (folder + session-control tools); this installer granting it IS
-    the explicit per-agent assignment that set requires — it is deliberately
-    absent from the default agent's spec.
+    per-agent set (folder + session-control tools + conductor tools); this
+    installer granting it IS the explicit per-agent assignment that set
+    requires — it is deliberately absent from the default agent's spec.
 
     ``@kirocrew-dashboard`` is MOUNTED whole but auto-approved only verb by verb,
     via ``_CONDUCTOR_DASHBOARD_GRANTS`` (see its comment for the per-verb
@@ -4552,11 +4556,13 @@ def _install_conductor_agent() -> None:
     ingests untrusted content by design and the server-side gates bound which
     target is reachable, not what is done to it.
 
-    ``execute_bash`` is withheld for a different reason that is worth keeping
-    distinct: ``allowedTools`` is name-scoped with no argument matching, so
-    trusting the two bundled scripts cannot be told apart from trusting arbitrary
-    shell. There is no per-argument form of that grant the way there is a per-tool
-    form of the MCP one.
+    ``conductor_accept_eval`` and ``conductor_ledger_entry`` are granted because
+    they satisfy the invariant: the evaluator reads and computes (no mutation of
+    user-visible state), and the ledger codec encodes/validates/rotates entry
+    values (creates new values, never mutates existing user-visible state). They
+    replace the prior ``execute_bash`` approach where ``allowedTools`` had no
+    argument matching and trusting the two bundled scripts could not be told
+    apart from trusting arbitrary shell.
 
     The operating procedure ships as the ``goal-conductor`` builtin skill, NOT
     ``conductor``: that skill name is owned by the generated delegation skill
@@ -4575,7 +4581,6 @@ def _install_conductor_agent() -> None:
     )
     config["prompt"] = _CONDUCTOR_SYSTEM_PROMPT
     config["tools"] = [
-        "execute_bash",
         "fs_read",
         # ``web_fetch`` serves the charter's own worked example (reading an issue
         # list during triage). Deliberately NOT mounted: ``web_search`` (nothing

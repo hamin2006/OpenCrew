@@ -86,6 +86,8 @@ from kiro_crew.validation import (
     CHAT_FOLDER_MOVE_SCHEMA,
     CHAT_FOLDER_MOVE_SESSION_SCHEMA,
     CHAT_FOLDER_TREE_SCHEMA,
+    CONDUCTOR_ACCEPT_EVAL_SCHEMA,
+    CONDUCTOR_LEDGER_ENTRY_SCHEMA,
     MCP_DASHBOARD_SCHEMAS,
     SESSION_CREATE_SCHEMA,
     SESSION_READ_MESSAGE_SCHEMA,
@@ -338,6 +340,78 @@ def _tool_definitions() -> list[dict[str, Any]]:
                     },
                 },
                 "required": ["target"],
+            },
+        },
+        {
+            "name": "conductor_accept_eval",
+            "description": (
+                "Run the conductor's deterministic acceptance evaluator over a batch of "
+                "work items. Each item carries an acceptance spec (pr_checks, file, or "
+                "human_approval); the evaluator builds its own argv from the spec fields "
+                "and returns a verdict per item. This is the non-shell interface to "
+                "accept_eval.py: individually grantable without trusting arbitrary shell."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "description": (
+                            "Work items to evaluate. Each is an object with 'id' (string) "
+                            "and 'accept' (object with 'kind' plus kind-specific fields)."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string", "description": "Item identifier."},
+                                "accept": {
+                                    "type": "object",
+                                    "description": (
+                                        "Acceptance spec: {kind: 'pr_checks', pr: <int>, repo?: <str>} "
+                                        "or {kind: 'file', path: <str>, exists?: <bool>} "
+                                        "or {kind: 'human_approval'}."
+                                    ),
+                                },
+                            },
+                            "required": ["id", "accept"],
+                        },
+                    },
+                },
+                "required": ["items"],
+            },
+        },
+        {
+            "name": "conductor_ledger_entry",
+            "description": (
+                "The conductor's ledger item-entry codec: encode, decode, validate, or "
+                "rotate work-item entries for the session ledger's artifacts map. This is "
+                "the non-shell interface to ledger_entry.py: individually grantable "
+                "without trusting arbitrary shell. Each mode reads a payload and returns "
+                "a structured result; domain problems are {ok: false, error: {...}}, "
+                "never crashes."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["encode", "decode", "validate", "rotate"],
+                        "description": (
+                            "Operation: encode (fields->string), decode (string->fields), "
+                            "validate (check bounds before write), rotate (collapse/drop "
+                            "terminal entries)."
+                        ),
+                    },
+                    "payload": {
+                        "type": "object",
+                        "description": (
+                            "Mode-specific input. encode: {accept, session, round, status, "
+                            "since?, fails?}. decode: {value}. validate: {artifacts}. "
+                            "rotate: {artifacts}."
+                        ),
+                    },
+                },
+                "required": ["mode", "payload"],
             },
         },
     ]
@@ -1161,6 +1235,38 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
             return redact(f"Unfiled session `{slot_key}` to the top level.")
         folder_label = _chat_folder_paths(chat_folders).get(fld_id, fld_id)
         return redact(f"Moved session `{slot_key}` into `{folder_label}` (id={fld_id}).")
+
+    if name == "conductor_accept_eval":
+        args = validate_tool_args(args, CONDUCTOR_ACCEPT_EVAL_SCHEMA)
+        from kiro_crew import conductor_scripts
+
+        items = args["items"]
+        results = []
+        for position, item in enumerate(items):
+            item_id = f"#{position}"
+            try:
+                if not isinstance(item, dict):
+                    raise TypeError(f"item must be a JSON object, got {type(item).__name__}")
+                item_id = str(item.get("id", item_id))
+                verdict, evidence = conductor_scripts.evaluate_item(item)
+            except Exception as exc:
+                verdict, evidence = "error", f"evaluator bug on this item: {exc}"
+            results.append({"id": item_id, "verdict": verdict, "evidence": evidence})
+        import json as _json
+
+        return _json.dumps({"results": results}, indent=2)
+
+    if name == "conductor_ledger_entry":
+        args = validate_tool_args(args, CONDUCTOR_LEDGER_ENTRY_SCHEMA)
+        from kiro_crew import conductor_scripts
+
+        mode = args["mode"]
+        payload = args["payload"]
+        result = conductor_scripts.ledger_mode(mode, payload)
+        import json as _json
+
+        return _json.dumps(result, indent=2)
+
     return f"Error: unknown tool '{name}'"
 
 

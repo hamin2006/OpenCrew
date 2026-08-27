@@ -69,15 +69,15 @@ class TestConductorInstaller:
         No ``fs_write``: the conductor cannot do a work item's work itself.
         ``@kirocrew-dashboard`` is MOUNTED whole but never granted whole — the
         auto-approve list names verbs, so the destructive ones keep prompting.
-        ``execute_bash`` is mounted and never granted, because ``allowedTools``
-        has no argument matching and trusting the two bundled scripts cannot be
-        told apart from trusting arbitrary shell.
+        ``execute_bash`` is no longer mounted: the bundled scripts are now
+        available as individually-grantable MCP tools (``conductor_accept_eval``
+        and ``conductor_ledger_entry``) on the dashboard server.
         """
         data = self._install(tmp_path, monkeypatch)
         assert "fs_write" not in data["tools"]
         assert "@kirocrew-dashboard" in data["tools"]
         assert "@kirocrew-dashboard" not in data["allowedTools"]
-        assert "execute_bash" in data["tools"]
+        assert "execute_bash" not in data["tools"]
         assert "execute_bash" not in data["allowedTools"]
 
     def test_only_create_and_read_verbs_are_auto_approved(self, tmp_path, monkeypatch):
@@ -111,6 +111,8 @@ class TestConductorInstaller:
             "chat_folder_create",
             "session_create",
             "session_read_message",
+            "conductor_accept_eval",
+            "conductor_ledger_entry",
         ):
             assert f"@kirocrew-dashboard/{verb}" in granted, verb
 
@@ -129,6 +131,8 @@ class TestConductorInstaller:
             "@kirocrew-dashboard/chat_folder_create",
             "@kirocrew-dashboard/session_create",
             "@kirocrew-dashboard/session_read_message",
+            "@kirocrew-dashboard/conductor_accept_eval",
+            "@kirocrew-dashboard/conductor_ledger_entry",
         }
         # The bare server must never appear: it would grant every verb, including
         # the four the test above withholds.
@@ -223,6 +227,8 @@ class TestConductorInstaller:
             "@kirocrew-dashboard/chat_folder_create",
             "@kirocrew-dashboard/session_create",
             "@kirocrew-dashboard/session_read_message",
+            "@kirocrew-dashboard/conductor_accept_eval",
+            "@kirocrew-dashboard/conductor_ledger_entry",
         ]
 
     def test_kas_permissions_are_derived_from_the_filtered_grants(self, tmp_path, monkeypatch):
@@ -239,6 +245,8 @@ class TestConductorInstaller:
         dashboard_resources = [
             "kirocrew-dashboard/chat_folder_create",
             "kirocrew-dashboard/chat_folder_tree",
+            "kirocrew-dashboard/conductor_accept_eval",
+            "kirocrew-dashboard/conductor_ledger_entry",
             "kirocrew-dashboard/session_create",
             "kirocrew-dashboard/session_read_message",
         ]
@@ -325,6 +333,8 @@ class TestConductorInstaller:
             "@kirocrew-dashboard/chat_folder_create",
             "@kirocrew-dashboard/session_create",
             "@kirocrew-dashboard/session_read_message",
+            "@kirocrew-dashboard/conductor_accept_eval",
+            "@kirocrew-dashboard/conductor_ledger_entry",
         ]
 
     def test_skill_gates_the_plan_once_instead_of_interrogating(self):
@@ -366,15 +376,21 @@ class TestConductorInstaller:
     def test_skill_states_the_real_approval_cost(self):
         """The cost note must match the spec, or patrol plans for wrong prompts.
 
-        The granted verbs run silently while `session_send` / `session_stop` and
-        the bundled scripts prompt, so a skill that claimed either "everything
-        prompts" or "nothing prompts" would have the conductor sizing its nudge
-        interval around approvals it does not pay — or walking into ones it does.
+        The granted verbs and the conductor's MCP tools run silently while
+        `session_send` / `session_stop` prompt, so a skill that claimed either
+        "everything prompts" or "nothing prompts" would have the conductor sizing
+        its nudge interval around approvals it does not pay — or walking into ones
+        it does. The per-cycle approval stall is resolved: `conductor_accept_eval`
+        and `conductor_ledger_entry` are auto-approved, so patrol never blocks.
         """
         text = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
         assert "Reads and creates do not prompt" in text
         assert "`chat_folder_move_session`,\n  `session_send` and `session_stop`" in text
-        assert "accept_eval.py` invocation" in text
+        # The per-cycle stall is resolved: no more blocking on accept_eval.py
+        assert "each patrol cycle blocks on one approval" not in text
+        # The MCP tools are referenced
+        assert "conductor_accept_eval" in text
+        assert "conductor_ledger_entry" in text
 
     def test_skill_documents_artifacts_as_a_string_map(self):
         """The ledger's ``artifacts`` values MUST be JSON-serialized strings.
@@ -385,19 +401,19 @@ class TestConductorInstaller:
         state — the exact durability this entry exists to provide. Pinned as a
         doc ratchet because the instruction, not the code, is what would drift.
 
-        The format is owned by ``scripts/ledger_entry.py`` (issue #5912), so
-        the skill must route encoding through the codec rather than carrying a
-        hand-written byte-format example for models to re-derive — the worked
-        example was the specification once, and produced real defects on
-        PR #5652.
+        The format is owned by ``conductor_ledger_entry`` (the MCP tool backed by
+        ``scripts/ledger_entry.py``, issue #5912), so the skill must route
+        encoding through the codec rather than carrying a hand-written byte-format
+        example for models to re-derive — the worked example was the
+        specification once, and produced real defects on PR #5652.
         """
         text = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
         assert "artifacts_not_string_map" in text
         assert "map of string to STRING" in text
         # The codec is the format's one code owner: the skill must direct the
         # conductor to it for encode/decode/validate/rotate...
-        assert "scripts/ledger_entry.py" in text
-        assert "ledger_entry.py encode" in text
+        assert "conductor_ledger_entry" in text
+        assert 'mode="encode"' in text
         # ...and must never show a bare `item-1 -> {` object literal, which is
         # exactly the value shape the ledger rejects.
         assert "item-1 -> {" not in text
