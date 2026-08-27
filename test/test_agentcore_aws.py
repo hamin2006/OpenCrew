@@ -1,0 +1,231 @@
+"""IaC-installed AgentCore extra — boto3 is mocked; no live AWS."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+import sys
+import time
+
+from kiro_crew.platform.interfaces import SessionPrincipal
+
+
+def _principal(*, jwt: str | None = None) -> SessionPrincipal:
+    return SessionPrincipal(
+        surface="dashboard",
+        subject="dashboard+owner",
+        session_key="agent:main:main",
+        user_jwt=jwt,
+    )
+
+
+def _jwt(*, exp: float | None = None) -> str:
+    payload = {"exp": int(exp if exp is not None else time.time() + 600)}
+    body = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    return f"hdr.{body}.sig"
+
+
+def test_importing_the_module_does_not_import_boto3() -> None:
+    sys.modules.pop("kiro_crew.platform.agentcore_aws", None)
+    before = "boto3" in sys.modules
+    import kiro_crew.platform.agentcore_aws as aws_mod
+
+    assert aws_mod.ENV_WORKLOAD
+    if not before:
+        assert "boto3" not in sys.modules
+
+
+def test_opted_in_requires_name_and_flag_or_posture(monkeypatch) -> None:
+    from kiro_crew.platform import agentcore_aws as aws_mod
+
+    monkeypatch.delenv(aws_mod.ENV_WORKLOAD, raising=False)
+    monkeypatch.delenv(aws_mod.ENV_AWS, raising=False)
+    monkeypatch.delenv(aws_mod.ENV_POSTURE, raising=False)
+    assert aws_mod.opted_in() is False
+
+    monkeypatch.setenv(aws_mod.ENV_WORKLOAD, "kirocrew-kc-abc")
+    assert aws_mod.opted_in() is False
+
+    monkeypatch.setenv(aws_mod.ENV_AWS, "1")
+    assert aws_mod.opted_in() is True
+
+    monkeypatch.delenv(aws_mod.ENV_AWS)
+    monkeypatch.setenv(aws_mod.ENV_POSTURE, "workload")
+    assert aws_mod.opted_in() is True
+
+    monkeypatch.setenv(aws_mod.ENV_POSTURE, "none")
+    assert aws_mod.opted_in() is False
+
+
+def test_try_aws_returns_none_when_boto3_missing(monkeypatch) -> None:
+    from kiro_crew.platform import agentcore_aws as aws_mod
+
+    monkeypatch.setenv(aws_mod.ENV_WORKLOAD, "kirocrew-kc-abc")
+    monkeypatch.setenv(aws_mod.ENV_AWS, "1")
+    monkeypatch.setattr(aws_mod, "extra_available", lambda: False)
+    assert aws_mod.try_aws_agent_identity() is None
+
+
+def test_status_has_no_token_material(monkeypatch) -> None:
+    from kiro_crew.platform import agentcore_aws as aws_mod
+
+    monkeypatch.setenv(aws_mod.ENV_WORKLOAD, "kirocrew-kc-abc")
+    monkeypatch.setenv(aws_mod.ENV_POSTURE, "workload")
+    monkeypatch.setenv(aws_mod.ENV_GATEWAY_URL, "https://gw.example.test/mcp")
+    status = aws_mod.AwsAgentIdentityProvider().status()
+    dumped = json.dumps(status)
+    assert "workloadAccessToken" not in dumped
+    assert "Authorization" not in dumped
+    assert not any(k.lower() in {"token", "secret", "bearer"} for k in status)
+    assert status["adapter"] == "aws"
+    assert status["credentialKind"] == "m2m"
+    assert status["vaultedOwnerToken"] is False
+    assert status["gatewayUrlConfigured"] is True
+
+
+def test_gateway_mcp_spec_requires_https(monkeypatch) -> None:
+    from kiro_crew.platform import agentcore_aws as aws_mod
+
+    provider = aws_mod.AwsAgentIdentityProvider()
+    monkeypatch.delenv(aws_mod.ENV_GATEWAY_URL, raising=False)
+    assert provider.gateway_mcp_spec() is None
+    monkeypatch.setenv(aws_mod.ENV_GATEWAY_URL, "http://insecure.example/mcp")
+    assert provider.gateway_mcp_spec() is None
+    monkeypatch.setenv(aws_mod.ENV_GATEWAY_URL, "https://gw.example.test/mcp")
+    assert provider.gateway_mcp_spec() == {"url": "https://gw.example.test/mcp"}
+
+
+def test_vend_workload_access_token_uses_standalone_api(monkeypatch) -> None:
+    from kiro_crew.platform import agentcore_aws as aws_mod
+
+    calls: list[tuple[str, dict]] = []
+
+    class _Client:
+        def get_workload_access_token(self, **kwargs):
+            calls.append(("standalone", kwargs))
+            return {"workloadAccessToken": "wat-m2m"}
+
+        def get_workload_access_token_for_jwt(self, **kwargs):
+            calls.append(("jwt", kwargs))
+            return {"workloadAccessToken": "wat-user"}
+
+    monkeypatch.setenv(aws_mod.ENV_WORKLOAD, "kirocrew-kc-abc")
+    monkeypatch.setattr(aws_mod, "_client", lambda: _Client())
+    token = asyncio.run(aws_mod.AwsAgentIdentityProvider().vend_workload_access_token(_principal()))
+    assert token == "wat-m2m"
+    assert calls == [("standalone", {"workloadName": "kirocrew-kc-abc"})]
+
+
+def test_vend_workload_access_token_for_jwt(monkeypatch) -> None:
+    from kiro_crew.platform import agentcore_aws as aws_mod
+
+    class _Client:
+        def get_workload_access_token_for_jwt(self, **kwargs):
+            return {"workloadAccessToken": "wat-user"}
+
+        def get_workload_access_token(self, **kwargs):
+            raise AssertionError("standalone path must not run when a user JWT is present")
+
+    monkeypatch.setenv(aws_mod.ENV_WORKLOAD, "kirocrew-kc-abc")
+    monkeypatch.setattr(aws_mod, "_client", lambda: _Client())
+    jwt = _jwt()
+    token = asyncio.run(
+        aws_mod.AwsAgentIdentityProvider().vend_workload_access_token(_principal(jwt=jwt))
+    )
+    assert token == "wat-user"
+
+
+def test_inbound_token_is_operator_jwt_not_wat(monkeypatch) -> None:
+    from kiro_crew.platform import agentcore_aws as aws_mod
+
+    monkeypatch.setenv(aws_mod.ENV_GATEWAY_URL, "https://gw.example.test/mcp")
+    jwt = _jwt(exp=1_800_000_000)
+    inbound = asyncio.run(
+        aws_mod.AwsAgentIdentityProvider().vend_gateway_inbound_token(_principal(jwt=jwt))
+    )
+    assert inbound is not None
+    assert inbound.scheme == "bearer"
+    assert inbound.token == jwt
+    assert inbound.expires_at == 1_800_000_000.0
+    assert inbound.audience == "https://gw.example.test/mcp"
+
+
+def test_inbound_token_absent_without_user_jwt() -> None:
+    from kiro_crew.platform import agentcore_aws as aws_mod
+
+    inbound = asyncio.run(
+        aws_mod.AwsAgentIdentityProvider().vend_gateway_inbound_token(_principal())
+    )
+    assert inbound is None
+
+
+def test_vend_returns_none_when_client_missing(monkeypatch) -> None:
+    from kiro_crew.platform import agentcore_aws as aws_mod
+
+    monkeypatch.setenv(aws_mod.ENV_WORKLOAD, "kirocrew-kc-abc")
+    monkeypatch.setattr(aws_mod, "_client", lambda: None)
+    token = asyncio.run(aws_mod.AwsAgentIdentityProvider().vend_workload_access_token(_principal()))
+    assert token is None
+
+
+def test_bootstrap_attaches_adapter_only_when_opted_in(monkeypatch) -> None:
+    from kiro_crew.config.loader import KiroCrewConfig
+    from kiro_crew.platform import agentcore_aws as aws_mod
+    from kiro_crew.platform import bootstrap
+    from kiro_crew.platform.defaults import DefaultAgentIdentityProvider
+
+    monkeypatch.setattr(aws_mod, "opted_in", lambda: False)
+    ctx = bootstrap.build_default_context(KiroCrewConfig.load())
+    # build_default_context itself stays Default; bootstrap_context does the swap.
+    assert isinstance(ctx.agent_identity, DefaultAgentIdentityProvider)
+
+    class _Fake(aws_mod.AwsAgentIdentityProvider):
+        pass
+
+    monkeypatch.setattr(aws_mod, "try_aws_agent_identity", lambda: _Fake())
+    monkeypatch.setattr(bootstrap, "plugin_entry_points", lambda: ())
+    monkeypatch.setattr(bootstrap, "resolve_profile", lambda *a, **k: "standalone")
+    bootstrap._reset_boot_state()
+    ctx = bootstrap.bootstrap_context(KiroCrewConfig.load())
+    assert isinstance(ctx.agent_identity, _Fake)
+
+
+def test_workload_identity_name_from_env(monkeypatch) -> None:
+    from kiro_crew.platform import agentcore_aws as aws_mod
+
+    monkeypatch.setenv(aws_mod.ENV_WORKLOAD, "kirocrew-kc-abc")
+    monkeypatch.setattr(
+        aws_mod,
+        "_workload_arn",
+        lambda name: f"arn:aws:bedrock-agentcore:us-east-1:1:workload-identity/{name}",
+    )
+    ident = aws_mod.AwsAgentIdentityProvider().workload_identity()
+    assert ident is not None
+    assert ident.name == "kirocrew-kc-abc"
+    assert ident.name in ident.arn
+
+
+def test_normalize_agentcore_gateway_url() -> None:
+    from kiro_crew.cloud import iam
+
+    assert iam.normalize_agentcore_gateway_url("") == ""
+    assert (
+        iam.normalize_agentcore_gateway_url("https://gw.example.test/mcp")
+        == "https://gw.example.test/mcp"
+    )
+    try:
+        iam.normalize_agentcore_gateway_url("http://gw.example.test/mcp")
+        raise AssertionError("http must be refused")
+    except ValueError:
+        pass
+    try:
+        iam.normalize_agentcore_gateway_url("https://user:pass@gw.example.test/mcp")
+        raise AssertionError("credentials must be refused")
+    except ValueError:
+        pass
+    try:
+        iam.normalize_agentcore_gateway_url("https://" + "g" * iam.AGENTCORE_GATEWAY_URL_MAX)
+        raise AssertionError("over-long URL must be refused")
+    except ValueError:
+        pass

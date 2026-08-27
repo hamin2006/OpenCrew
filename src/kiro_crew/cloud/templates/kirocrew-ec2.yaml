@@ -136,6 +136,14 @@ Parameters:
       Name of the AWS::BedrockAgentCore::WorkloadIdentity the stack creates
       (kirocrew-<StackTag>). Required when AgentCorePosture is not none; the
       launcher fills it. Empty on a default launch.
+  AgentCoreGatewayUrl:
+    Type: String
+    Default: ""
+    MaxLength: 512
+    Description: >-
+      MCP URL of an existing Amazon Bedrock AgentCore Gateway this crew
+      should call. Empty means identity is created but no Gateway spec is
+      contributed until the operator sets KIROCREW_AGENTCORE_GATEWAY_URL.
 
 # The AMI is resolved at deploy time from the public SSM Parameter Store alias —
 # never a hardcoded per-region AMI id. Latest Amazon Linux 2023 for the arch.
@@ -637,10 +645,12 @@ Resources:
           export KIROCREW_REQUIRE_FRONTEND=1
           # One retry: first-boot contention can signal-kill the first build;
           # the warm re-run reliably succeeds (see "Source fetch" above).
-          if ! bash install.sh --voice; then
+          AC_EXTRA=""
+          if [ "${AgentCorePosture}" != "none" ]; then AC_EXTRA="--agentcore"; fi
+          if ! bash install.sh --voice $AC_EXTRA; then
             echo "install.sh failed on first attempt - settling then retrying once"
             sleep 20
-            bash install.sh --voice
+            bash install.sh --voice $AC_EXTRA
           fi
           KCFETCH
           chmod +x /tmp/kcfetch.sh
@@ -689,6 +699,7 @@ Resources:
           Environment=KIROCREW_PORT=${DashboardPort}
           Environment=KIROCREW_AGENTCORE_POSTURE=${AgentCorePosture}
           Environment=KIROCREW_AGENTCORE_WORKLOAD_NAME=${AgentCoreWorkloadName}
+          Environment=KIROCREW_AGENTCORE_GATEWAY_URL=${AgentCoreGatewayUrl}
 
           [Install]
           WantedBy=multi-user.target

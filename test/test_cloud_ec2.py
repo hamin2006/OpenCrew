@@ -162,6 +162,9 @@ class TestTemplate:
         assert "AgentCorePosture:" in text
         assert "AllowedValues: [none, workload, login]" in text
         assert "KIROCREW_AGENTCORE_WORKLOAD_NAME" in text
+        assert "KIROCREW_AGENTCORE_GATEWAY_URL" in text
+        assert "AgentCoreGatewayUrl:" in text
+        assert "install.sh --voice $AC_EXTRA" in text
         assert "CrewWorkloadIdentity:" in text
         assert "AgentCoreWorkloadInstancePolicy:" in text
         assert "AgentCoreLoginInstancePolicy:" in text
@@ -432,6 +435,7 @@ class TestUserDataSize:
         "DashboardPort": "65535",
         "AgentCorePosture": "workload",
         "AgentCoreWorkloadName": "n" * 255,
+        "AgentCoreGatewayUrl": "https://" + "g" * 500,
         "StackTag": "t" * 51,
         "AWS::AccountId": "1" * 12,
         "AWS::Region": "ap-southeast-99",
@@ -514,6 +518,19 @@ class TestBuildDeployArgv:
         assert f"PermissionsBoundaryArn={_BOUNDARY_ARN}" in argv
         assert "AgentCorePosture=none" in argv
         assert "AgentCoreWorkloadName=" in argv
+        assert "AgentCoreGatewayUrl=" in argv
+
+    def test_agentcore_gateway_url_override(self):
+        tier = sizes.get_tier("balanced")
+        argv = ec2.build_deploy_argv(
+            tag="t1",
+            tier=tier,
+            vpc_id="vpc-1",
+            subnet_id="subnet-1",
+            permissions_boundary_arn=_BOUNDARY_ARN,
+            agentcore_gateway_url="https://gw.example.test/mcp",
+        )
+        assert "AgentCoreGatewayUrl=https://gw.example.test/mcp" in argv
         # discovery tags applied to the stack
         assert "kirocrew:managed=true" in argv
         assert "kirocrew:instance=t1" in argv

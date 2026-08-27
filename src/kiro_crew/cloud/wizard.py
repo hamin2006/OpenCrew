@@ -40,6 +40,7 @@ def _deploy_with_progress(
     subnet_id: str = "",
     disable_rollback: bool = False,
     agentcore_posture: str = "none",
+    agentcore_gateway_url: str = "",
 ) -> ec2.DeployResult:
     """Run ``ec2.deploy`` while streaming live CloudFormation + bootstrap logs.
 
@@ -66,6 +67,7 @@ def _deploy_with_progress(
                 subnet_id=subnet_id,
                 disable_rollback=disable_rollback,
                 agentcore_posture=agentcore_posture,
+                agentcore_gateway_url=agentcore_gateway_url,
                 proc_sink=lambda p: deploy_proc.__setitem__("proc", p),
             )
         except BaseException as exc:  # noqa: BLE001 - surfaced on join
@@ -315,6 +317,7 @@ def launch(
     keep_on_failure: bool = False,
     hold_tunnel: bool = True,
     agentcore_posture: str = "none",
+    agentcore_gateway_url: str = "",
 ) -> int:
     """Run the full interactive launch flow. Returns a process exit code.
 
@@ -326,6 +329,8 @@ def launch(
     steps to print after this one. ``agentcore_posture`` of ``workload`` or
     ``login`` has CloudFormation create an Amazon Bedrock AgentCore
     WorkloadIdentity and attach it to the instance.
+    ``agentcore_gateway_url`` is the existing Gateway MCP URL written into
+    the instance unit as ``KIROCREW_AGENTCORE_GATEWAY_URL``.
     """
     cfg = CloudConfig.load()
     profile = profile or cfg.profile
@@ -338,6 +343,11 @@ def launch(
             # instead of a traceback (launch() is also a public entrypoint).
             ui.fail(str(exc))
             return 1
+    try:
+        agentcore_gateway_url = iam.normalize_agentcore_gateway_url(agentcore_gateway_url)
+    except ValueError as exc:
+        ui.fail(str(exc))
+        return 1
 
     print(ui.BANNER)
     steps = ui.Steps(_TOTAL_STEPS)
@@ -465,6 +475,7 @@ def launch(
                 subnet_id=subnet_id,
                 disable_rollback=keep_on_failure,
                 agentcore_posture=agentcore_posture,
+                agentcore_gateway_url=agentcore_gateway_url,
             )
         except AWSError as exc:
             ui.fail(str(exc))

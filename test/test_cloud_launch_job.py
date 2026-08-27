@@ -66,8 +66,10 @@ class FakeEngine:
         if self.preflight_exc:
             raise self.preflight_exc
 
-    def provision(self, *, tag, size_key, profile, region, agentcore_posture="none"):
-        self.calls.append(("provision", tag, size_key, agentcore_posture))
+    def provision(
+        self, *, tag, size_key, profile, region, agentcore_posture="none", agentcore_gateway_url=""
+    ):
+        self.calls.append(("provision", tag, size_key, agentcore_posture, agentcore_gateway_url))
         if self.provision_exc:
             raise self.provision_exc
         return "i-0abc123456789def0"
@@ -115,6 +117,19 @@ class TestStoreDurability:
         loaded = lj.LaunchJobStore(root=s1.root).get(job.id)
         assert loaded is not None
         assert loaded.agentcore_posture == "workload"
+
+    def test_create_persists_agentcore_gateway_url(self, tmp_path):
+        s1 = _store(tmp_path)
+        job = s1.create(
+            profile="dev",
+            region="us-east-1",
+            size_key="balanced",
+            agentcore_posture="workload",
+            agentcore_gateway_url="https://gw.example.test/mcp",
+        )
+        loaded = lj.LaunchJobStore(root=s1.root).get(job.id)
+        assert loaded is not None
+        assert loaded.agentcore_gateway_url == "https://gw.example.test/mcp"
 
     def test_create_rejects_unknown_size(self, tmp_path):
         with pytest.raises(KeyError):

@@ -1615,6 +1615,7 @@ export interface LaunchJob {
   region: string
   size_key: string
   agentcore_posture?: 'none' | 'workload' | 'login'
+  agentcore_gateway_url?: string
   tag: string
   status: LaunchJobStatus
   steps: LaunchStep[]
@@ -2139,6 +2140,7 @@ export const api = {
     region: string
     size_key: string
     agentcore_posture?: 'none' | 'workload' | 'login'
+    agentcore_gateway_url?: string
   }) =>
     post('/api/cloud/launch', body).then(j) as Promise<LaunchJob>,
   cloudLaunchStatus: (id: string) =>

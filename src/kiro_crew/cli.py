@@ -1804,6 +1804,13 @@ Examples:
         "(workload = IAM Gateway at boot; login = JWT after sign-in; "
         "none = no identity)",
     )
+    _c_launch.add_argument(
+        "--agentcore-gateway-url",
+        default="",
+        metavar="URL",
+        help="Existing AgentCore Gateway MCP URL written onto the instance "
+        "(https only; empty = identity without a Gateway spec)",
+    )
 
     _c_list = cloud_sub.add_parser("list", help="List your Kiro Crew cloud instances")
     _cloud_creds_opts(_c_list)

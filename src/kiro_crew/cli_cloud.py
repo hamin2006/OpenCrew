@@ -48,6 +48,13 @@ def _resolve_tag(args: argparse.Namespace) -> str:
 
 def _cloud_launch(args: argparse.Namespace) -> int:
     profile, region = _resolve(args)
+    try:
+        gateway_url = iam.normalize_agentcore_gateway_url(
+            getattr(args, "agentcore_gateway_url", "") or ""
+        )
+    except ValueError as exc:
+        ui.fail(str(exc))
+        return 1
     return wizard.launch(
         profile=profile,
         region=region,
@@ -58,6 +65,7 @@ def _cloud_launch(args: argparse.Namespace) -> int:
         keep_on_failure=getattr(args, "keep_on_failure", False),
         hold_tunnel=getattr(args, "hold_tunnel", True),
         agentcore_posture=getattr(args, "agentcore_posture", "none") or "none",
+        agentcore_gateway_url=gateway_url,
     )
 
 

@@ -437,6 +437,7 @@ def build_deploy_argv(
     source_key: str = "",
     agentcore_posture: str = "none",
     agentcore_workload_name: str = "",
+    agentcore_gateway_url: str = "",
 ) -> list[str]:
     """Assemble the exact ``aws cloudformation deploy`` argv (also the dry-run output).
 
@@ -458,6 +459,7 @@ def build_deploy_argv(
         f"PermissionsBoundaryArn={permissions_boundary_arn}",
         f"AgentCorePosture={agentcore_posture}",
         f"AgentCoreWorkloadName={agentcore_workload_name}",
+        f"AgentCoreGatewayUrl={agentcore_gateway_url}",
     ]
     # Prefer the S3 source (private-repo safe); else pass git repo/ref fallback.
     if source_bucket:
@@ -501,6 +503,7 @@ def deploy(
     dry_run: bool = False,
     proc_sink: Optional[Any] = None,
     agentcore_posture: str = "none",
+    agentcore_gateway_url: str = "",
 ) -> DeployResult:
     """Provision (or update) the KiroCrew stack. Idempotent by stack name.
 
@@ -535,6 +538,7 @@ def deploy(
 
     posture = iam.normalize_agentcore_posture(agentcore_posture)
     workload_name = iam.agentcore_workload_name(tag, posture)
+    agentcore_gateway_url = iam.normalize_agentcore_gateway_url(agentcore_gateway_url)
     boundary_name = iam.AGENTCORE_BOUNDARY_NAME if posture != "none" else iam.BOUNDARY_NAME
 
     if ship_source is None:
@@ -560,6 +564,7 @@ def deploy(
             source_key=f"{tag}/kirocrew-src.tar.gz" if ship_source else "",
             agentcore_posture=posture,
             agentcore_workload_name=workload_name,
+            agentcore_gateway_url=agentcore_gateway_url,
         )
         return DeployResult(
             tag=tag,
@@ -627,6 +632,7 @@ def deploy(
         source_key=source_key,
         agentcore_posture=posture,
         agentcore_workload_name=workload_name,
+        agentcore_gateway_url=agentcore_gateway_url,
     )
     # `cloudformation deploy` blocks until the stack settles (WaitCondition gates
     # on the gateway being healthy). "No changes" exits 0 with a message on reuse.

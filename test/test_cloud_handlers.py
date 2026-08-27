@@ -53,7 +53,9 @@ class FakeEngine:
     def preflight(self, profile, region):
         pass
 
-    def provision(self, *, tag, size_key, profile, region, agentcore_posture="none"):
+    def provision(
+        self, *, tag, size_key, profile, region, agentcore_posture="none", agentcore_gateway_url=""
+    ):
         return "i-0abc123456789def0"
 
     def begin_signin(self, *, instance_id, profile, region):
@@ -279,6 +281,23 @@ class TestLaunch:
         )
         assert resp.status == 202
         assert seen["tid"] != loop_tid, "create() ran on the event loop thread"
+
+    async def test_create_bad_gateway_url_400(self, tmp_path):
+        resp = await hc.api_cloud_launch_create(
+            _req(
+                "POST",
+                "/api/cloud/launch",
+                state=_state(tmp_path),
+                body={
+                    "profile": "dev",
+                    "region": "us-east-1",
+                    "size_key": "balanced",
+                    "agentcore_gateway_url": "http://insecure.example/mcp",
+                },
+            )
+        )
+        assert resp.status == 400
+        assert _body(resp)["code"] == "invalid_agentcore_gateway_url"
 
     async def test_create_bad_size_400(self, tmp_path):
         resp = await hc.api_cloud_launch_create(

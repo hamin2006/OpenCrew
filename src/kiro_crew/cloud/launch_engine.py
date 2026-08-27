@@ -114,6 +114,7 @@ class RealLaunchEngine:
         profile: str,
         region: str,
         agentcore_posture: str = "none",
+        agentcore_gateway_url: str = "",
     ) -> str:
         tier = sizes.get_tier(size_key)
         # No dashboard_port override: the stack binds its own DashboardPort
@@ -127,6 +128,7 @@ class RealLaunchEngine:
             profile=profile,
             region=region,
             agentcore_posture=agentcore_posture,
+            agentcore_gateway_url=agentcore_gateway_url,
         )
         return result.instance_id
 

@@ -290,7 +290,7 @@ async def api_cloud_launch_get(request: web.Request) -> web.Response:
 async def api_cloud_launch_create(request: web.Request) -> web.Response:
     """POST /api/cloud/launch — start a launch job.
 
-    Body: {profile, region, size_key, agentcore_posture?}.
+    Body: {profile, region, size_key, agentcore_posture?, agentcore_gateway_url?}.
     """
     denied = _guard(request, "launch_create")
     if denied is not None:
@@ -314,6 +314,18 @@ async def api_cloud_launch_create(request: web.Request) -> web.Response:
             {
                 "error": "agentcore_posture must be none, workload, or login",
                 "code": "invalid_agentcore_posture",
+            },
+            status=400,
+        )
+    try:
+        agentcore_gateway_url = iam.normalize_agentcore_gateway_url(
+            str(body.get("agentcore_gateway_url") or "")
+        )
+    except ValueError:
+        return web.json_response(
+            {
+                "error": "agentcore_gateway_url must be an https URL",
+                "code": "invalid_agentcore_gateway_url",
             },
             status=400,
         )
@@ -347,6 +359,7 @@ async def api_cloud_launch_create(request: web.Request) -> web.Response:
                     region=str(body.get("region", "")),
                     size_key=size_key,
                     agentcore_posture=agentcore_posture,
+                    agentcore_gateway_url=agentcore_gateway_url,
                 )
             )
         except KeyError as e:  # unknown size

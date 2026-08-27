@@ -83,10 +83,11 @@ rewriter, governance `SCOPE_CATALOG`, pytest-asyncio. Companion-only:
 | 4 | `probe` | Phase 0 verdict written back into the RFC (kiro-cli headers + standalone workload) |
 | 5 | `inject` | per-session Gateway header sidecar **or** header-proxy MCP; unpooled Gateway server |
 | 6 | `consent-unattended` | 3LO allowlist + dashboard/channel prompt + posture-aware cron/M2M policy + SEL; `security.md` |
-| 7 | companion (out of tree) | real `AgentIdentityProvider`, both authorizer types, workload registration, IdP JWT, Gateway URL |
+| 7 | extra + IaC (this repo) | `kirocrew[agentcore]` (`AwsAgentIdentityProvider`), CFN Gateway URL, `install.sh --agentcore`, systemd env |
 
-PRs 2, 2b, 3, 5, and 6 are this repository. PR 4 is a research commit
-that only edits the RFC. PR 7 is the enterprise companion package.
+PRs 2, 2b, 3, 5, 6, and 7 are this repository. PR 4 is a research commit
+that only edits the RFC. Operator IdP JWT annotation and Gateway/target
+control-plane stay companion-owned; token fetch on a launched box does not.
 PR 2b can land right after PR 2: the IAM helpers and the rebuild
 withhold do not need a live vend path.
 
@@ -493,37 +494,33 @@ local header-proxy MCP. Do not implement both.
 
 ---
 
-### Task 7: Companion package (out of this repository)
+### Task 7: In-repo extra + IaC (this repository)
 
-Not landed in Kiro Crew. The companion implements
-`AgentIdentityProvider` against:
+Landed in Kiro Crew as an opt-in extra, not a `kirocrew.plugins`
+companion. A launched box that opted into AgentCore actually vends.
 
-- `bedrock-agentcore:GetWorkloadAccessToken`
-- `bedrock-agentcore:GetWorkloadAccessTokenForJWT`
-- `bedrock-agentcore:GetWorkloadAccessTokenForUserId` (`workload`
-  posture only; denied in IAM under `login`)
-- A **standalone** workload identity named `kirocrew` (not
-  Gateway-managed, not Runtime-managed)
-- Gateway authorizer matches posture: `AWS_IAM` for `workload`,
-  `CUSTOM_JWT` (operator IdP) for `login`. One Gateway, one
-  authorizer — do not flip in place; relaunch or run two hosts
-- `McpToolingProvider.extra_mcp_servers()` URL-only Gateway spec
-- `IdentityProvider` SSO JWT → `annotate_principal.user_jwt`
-  (`login` only; this is the ensure-login)
+- Extra: `kirocrew[agentcore]` = `boto3>=1.34,<2` (`setup.cfg`)
+- Adapter: `platform/agentcore_aws.py` `AwsAgentIdentityProvider`
+- Bootstrap (standalone only): `dataclasses.replace` of
+  `agent_identity` when `opted_in()` — workload name plus
+  `KIROCREW_AGENTCORE_AWS=1` **or** posture `workload`/`login`
+- IaC: `install.sh --agentcore`; CFN `AgentCoreGatewayUrl`; systemd
+  `KIROCREW_AGENTCORE_GATEWAY_URL`
+- CLI: `kirocrew cloud launch --agentcore-gateway-url https://…`
+- Calls: `GetWorkloadAccessToken` / `GetWorkloadAccessTokenForJWT`
+  via boto3 client name `bedrock-agentcore`
+- Gateway spec: URL-only from the env; never a WAT bearer
+- Login inbound: operator IdP JWT on `principal.user_jwt` (companion
+  / IdP still owns annotation)
+- `status()` contains no token material
+- Do **not** register `kirocrew.plugins` (that flips enterprise
+  profile / fail-closed)
 
-Companion checklist (for the other repo's plan):
+Still companion-owned (other repo):
 
-- [ ] Create standalone workload; confirm `GetWorkloadAccessTokenForJWT`
-      works; confirm a Gateway-linked workload returns the "linked to a
-      service" error (negative test).
-- [ ] IAM resource-scoped to
-      `workload-identity-directory/default/workload-identity/kirocrew`.
-- [ ] Prefer ForJWT; partition ForUserId as `{surface}+{id}`.
-- [ ] Register Gateway targets + OAuth credential providers (M2M / 3LO /
-      `TOKEN_EXCHANGE`) in the control plane, not in Crew config.
-- [ ] `status()` contains no token material.
-- [ ] Redaction overlay for any AgentCore-specific prefix the core
-      bearer heuristic misses.
+- Operator IdP JWT → `annotate_principal.user_jwt`
+- Gateway + target + OAuth provider control plane
+- kiro-cli SigV4 for workload IAM `InvokeGateway` (open follow-on)
 
 ---
 
@@ -541,15 +538,16 @@ Companion checklist (for the other repo's plan):
 6. PR 6 can overlap PR 5 once the injection tests exist, but do not
    merge consent UI that points at a server the inject path cannot
    attach.
-7. Do not start PR 7 (companion) until PR 2's Protocol is on the core
-   version the companion will pin.
+7. Task 7 (this extra) can land on the same Protocol as PR 2. Do not
+   start a companion package to fetch tokens.
 
 **Do not implement Phase 5 of the RFC** (Crew-direct
 `GetResourceOauth2Token`) in this stack.
 
 ## Verification before calling a phase done
 
-- Public tree still has zero AgentCore SDK imports.
+- Public tree still has zero `bedrock-agentcore` SDK imports (boto3
+  in the extra module only, lazy).
 - `DefaultAgentIdentityProvider.enabled()` is False and no Gateway
   server appears in a standalone `rebuild_agent_config()`.
 - `iam.policy_json()` still has no `InvokeGateway` /

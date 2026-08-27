@@ -272,9 +272,14 @@ in the same CloudFormation stack that creates the instance.
 - The instance role receives the posture grant automatically
   (`AWS::IAM::Policy`). Operators do not paste the instance
   Policy.json onto a CFN-launched box.
-- systemd gets `KIROCREW_AGENTCORE_POSTURE` and
-  `KIROCREW_AGENTCORE_WORKLOAD_NAME`. The companion adapter reads
-  those; the public core never imports an AgentCore SDK.
+- systemd gets `KIROCREW_AGENTCORE_POSTURE`,
+  `KIROCREW_AGENTCORE_WORKLOAD_NAME`, and optional
+  `KIROCREW_AGENTCORE_GATEWAY_URL`. A non-`none` posture installs
+  `kirocrew[agentcore]` (`boto3`) via `install.sh --agentcore`. The
+  in-repo extra (`platform/agentcore_aws.py`) reads those env vars
+  and calls `GetWorkloadAccessToken*` through a lazy boto3 client.
+  Public core never imports the `bedrock-agentcore` SDK package and
+  never registers `kirocrew.plugins`.
 - Opt-in: `AgentCorePosture=none` (default) is the historical
   launch. `kirocrew cloud launch --agentcore-posture workload`
   creates the AWS identity at deploy time. See-and-configure
@@ -457,14 +462,20 @@ the MCP header-injection site, governance, redaction, and SEL. It ships
 `DefaultAgentIdentityProvider` (all methods empty / `enabled() ==
 False`).
 
+An **opt-in extra** (`kirocrew[agentcore]`, boto3 only) implements
+`AgentIdentityProvider` in-tree as `AwsAgentIdentityProvider` so a
+deployed box can vend. IaC (`install.sh --agentcore`, the EC2
+template) installs it. Bootstrap swaps only `agent_identity` on a
+standalone profile — it does not flip to a companion and does not
+register `kirocrew.plugins`.
+
 The enterprise companion (separate package, `kirocrew.plugins` entry
-point) implements the protocol with `bedrock-agentcore` / boto3, holds
-region and workload ARN, talks to the operator IdP, and contributes the
-Gateway URL through `McpToolingProvider.extra_mcp_servers()`.
+point) remains the home for operator IdP JWT annotation, Cognito /
+SSO, and Gateway/target control-plane registration.
 
 Dependency stays one-way: companion depends on core. Core never imports
 `bedrock_agentcore`, never names Cognito, never hardcodes a discovery
-URL.
+URL. boto3 is imported only inside the extra module's methods.
 
 ### New CPP slot: `agent_identity`
 
@@ -689,10 +700,15 @@ at rebuild for `workload`; login vends onto
 `AcpClient._pooled_mcp_servers` appends the entry. The local
 header-proxy MCP is not implemented.
 
-**Verdict (2):** still companion-owned. Public core never calls
-`GetWorkloadAccessToken*`. CFN creates the standalone
-`AWS::BedrockAgentCore::WorkloadIdentity`; the companion adapter
-vends.
+**Verdict (2):** in-repo extra when opted in. Public Default stays a
+no-op. `AwsAgentIdentityProvider` calls `GetWorkloadAccessToken` /
+`GetWorkloadAccessTokenForJWT` through boto3 (`bedrock-agentcore`
+client name, not the `bedrock-agentcore` SDK). CFN creates the
+standalone `AWS::BedrockAgentCore::WorkloadIdentity`. WAT is still
+first-party only — never Gateway inbound. Login inbound is the
+operator IdP JWT on `principal.user_jwt`. Workload Gateway inbound
+is IAM (URL-only spec); kiro-cli SigV4 for `InvokeGateway` is an
+open follow-on, not a signing proxy in this cut.
 
 Exit: both answers recorded here. Phase 3 is blocked on (1). Phase 2
 is blocked on (2). If (1) is no, implement the local header-proxy MCP
@@ -708,8 +724,8 @@ dependency. Standalone behavior byte-identical.
 
 Exit: `test_platform_cpp_seam_coverage.py` lists the new slot;
 `enabled()` is False; unknown/absent posture with `enabled: true`
-fails closed; no `bedrock` / `agentcore` import under
-`src/kiro_crew/`.
+fails closed; no `bedrock-agentcore` SDK import under
+`src/kiro_crew/` (boto3 stays inside the opt-in extra).
 
 ### Phase 1b — Policy.json pair, boundary successor, login withhold
 
@@ -737,16 +753,16 @@ the instance helper for `login` denies `InvokeGateway` and
 `ForUserId`; a login-posture rebuild fixture contains no Kiro
 global server; the original boundary document is unchanged.
 
-### Phase 2 — Session principal + Identity vend (companion)
+### Phase 2 — Session principal + Identity vend (in-repo extra)
 
-Companion registers the standalone workload, implements
-`annotate_principal` / `vend_workload_access_token`, and fills
-`status()`. Core derives `SessionPrincipal` at session start and
-never accepts a tool-supplied user id.
+Core derives `SessionPrincipal` at session start and never accepts a
+tool-supplied user id. `AwsAgentIdentityProvider` (opt-in extra)
+implements `vend_workload_access_token` / `status()` /
+`gateway_mcp_spec()`. `annotate_principal` stays a pass-through
+until a companion fills `user_jwt`.
 
-Exit: companion tests (out of this repo) mint a workload token with
-ForJWT; ForUserId subjects are partitioned; injected messages do not
-vend.
+Exit: extra tests (mocked boto3) mint a workload token; `status()`
+has no token keys; injected messages do not vend.
 
 ### Phase 3 — Gateway MCP attach + inbound token injection
 
@@ -770,8 +786,9 @@ an allowlisted GET `/api/agentcore/consent` link; unknown hosts return
 `taskrunner:` keys. Workload user/OBO without
 `status().vaultedOwnerToken` writes a deny sidecar (`disabled: true`).
 SEL `agentcore.consent_url` / `agentcore.unattended_denied` log
-host+path / session+subject only — never token bytes. Companion
-`GetWorkloadAccessToken*` remains out of tree (Phase 5 / Task 7).
+host+path / session+subject only — never token bytes.
+`GetWorkloadAccessToken*` is the `kirocrew[agentcore]` extra
+(Task 7), not Phase 5 `GetResourceOauth2Token`.
 
 Exit: an unknown consent host is refused; a cron job cannot OBO as an
 arbitrary user.
@@ -784,8 +801,9 @@ same principal rules, same redaction. Do not start this phase to
 
 ## Backward compatibility
 
-- Standalone / public wheel: no new imports, no new MCP server, no new
-  default-on capability, no config migration.
+- Standalone / public wheel: no new default imports, no new MCP server,
+  no new default-on capability, no config migration. The `agentcore`
+  extra is opt-in (`pip install kirocrew[agentcore]` / IaC).
 - Companion: additive. A companion that does not override
   `agent_identity` inherits the Default (disabled).
 - Existing static remote MCP servers and `kiro_oauth_wire_entry` are
