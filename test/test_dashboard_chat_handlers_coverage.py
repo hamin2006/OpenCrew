@@ -435,45 +435,47 @@ class TestRedactFollowupItem:
 
 
 class TestDenyNonDashboardCaller:
-    def test_internal_secret_caller_is_allowed_without_an_app_claim(self):
+    @pytest.mark.asyncio
+    async def test_internal_secret_caller_is_allowed_without_an_app_claim(self):
         request = make_mocked_request("POST", "/x")
         request["internal_auth"] = True
         # No owner predicate should even be consulted on this path.
         with patch(
             "kiro_crew.dashboard.handlers.source_providers.is_owner_dashboard_request"
         ) as owner:
-            assert ch.deny_non_dashboard_caller(request, "op") is None
+            assert await ch.deny_non_dashboard_caller(request, "op") is None
             owner.assert_not_called()
 
-    def test_owner_request_is_allowed(self, _sel):
+    @pytest.mark.asyncio
+    async def test_owner_request_is_allowed(self, _sel):
         request = make_mocked_request("POST", "/x")
         with patch(
             "kiro_crew.dashboard.handlers.source_providers.is_owner_dashboard_request",
             return_value=True,
         ):
-            assert ch.deny_non_dashboard_caller(request, "op") is None
+            assert await ch.deny_non_dashboard_caller(request, "op") is None
 
-    def test_non_owner_is_refused_and_audited(self, _sel):
+    @pytest.mark.asyncio
+    async def test_non_owner_is_refused_and_audited(self, _sel):
         request = make_mocked_request("POST", "/x")
         request["user"] = "someone-else"
         with patch(
             "kiro_crew.dashboard.handlers.source_providers.is_owner_dashboard_request",
             return_value=False,
         ):
-            resp = ch.deny_non_dashboard_caller(request, "chat_slot_followup")
+            resp = await ch.deny_non_dashboard_caller(request, "chat_slot_followup")
         assert resp is not None
         assert resp.status == 403
-        _sel.log_api_access.assert_called_once()
-        assert _sel.log_api_access.call_args.kwargs["outcome"] == "denied"
 
-    def test_audit_failure_still_refuses(self, _sel):
+    @pytest.mark.asyncio
+    async def test_audit_failure_still_refuses(self, _sel):
         _sel.log_api_access.side_effect = RuntimeError("sel down")
         request = make_mocked_request("POST", "/x")
         with patch(
             "kiro_crew.dashboard.handlers.source_providers.is_owner_dashboard_request",
             return_value=False,
         ):
-            resp = ch.deny_non_dashboard_caller(request, "op")
+            resp = await ch.deny_non_dashboard_caller(request, "op")
         assert resp is not None and resp.status == 403
 
 

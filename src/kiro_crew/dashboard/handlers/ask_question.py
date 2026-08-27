@@ -25,10 +25,6 @@ import uuid
 from aiohttp import web
 
 from kiro_crew.dashboard.chat_utils import dashboard_slot_key
-from kiro_crew.dashboard.handlers.source_providers import (
-    is_owner_dashboard_request,
-    stale_owner_session_response,
-)
 from kiro_crew.dashboard.state import DashboardState
 from kiro_crew.sel import sel
 from kiro_crew.validation import (
@@ -94,7 +90,7 @@ def _deny_app_token(request: web.Request, operation: str) -> web.Response | None
     )
 
 
-def _deny_non_owner(request: web.Request, operation: str) -> web.Response | None:
+async def _deny_non_owner(request: web.Request, operation: str) -> web.Response | None:
     """Require the dashboard owner on these endpoints. Returns 403 or None.
 
     Denying app tokens is not sufficient. A dashboard session token is also
@@ -111,25 +107,9 @@ def _deny_non_owner(request: web.Request, operation: str) -> web.Response | None
     is configured. That matches the identity the ``ask_question`` MCP tool
     itself carries, since its token is minted as ``owner_id or "local-app"``.
     """
-    if is_owner_dashboard_request(request):
-        return None
-    try:
-        sel().log_api_access(
-            caller=str(request.get("user") or "anonymous"),
-            operation=operation,
-            outcome="denied",
-            source="dashboard",
-            resources="/api/ask-question",
-            error="agent-question endpoints are owner-only",
-        )
-    except Exception:
-        logger.warning("SEL audit failed for non-owner denial", exc_info=True)
-    # Deny decision made above; only the response label changes for a signed
-    # pre-owner bootstrap subject (see stale_owner_session_response).
-    stale = stale_owner_session_response(request)
-    if stale is not None:
-        return stale
-    return web.json_response({"error": "forbidden"}, status=403)
+    from kiro_crew.dashboard.handlers._shared import require_owner_dashboard_request
+
+    return await require_owner_dashboard_request(request, operation)
 
 
 async def api_ask_question(request: web.Request) -> web.Response:
@@ -144,7 +124,7 @@ async def api_ask_question(request: web.Request) -> web.Response:
     deny = _deny_app_token(request, "ask_question")
     if deny is not None:
         return deny
-    deny = _deny_non_owner(request, "ask_question")
+    deny = await _deny_non_owner(request, "ask_question")
     if deny is not None:
         return deny
     try:
@@ -234,7 +214,7 @@ async def api_ask_question_pending(request: web.Request) -> web.Response:
     deny = _deny_app_token(request, "ask_question_pending")
     if deny is not None:
         return deny
-    deny = _deny_non_owner(request, "ask_question_pending")
+    deny = await _deny_non_owner(request, "ask_question_pending")
     if deny is not None:
         return deny
     out: list[dict] = [
@@ -290,7 +270,7 @@ async def api_ask_question_dismiss(request: web.Request) -> web.Response:
     deny = _deny_app_token(request, "ask_question_dismiss")
     if deny is not None:
         return deny
-    deny = _deny_non_owner(request, "ask_question_dismiss")
+    deny = await _deny_non_owner(request, "ask_question_dismiss")
     if deny is not None:
         return deny
     try:
@@ -336,7 +316,7 @@ async def api_ask_question_answer(request: web.Request) -> web.Response:
     deny = _deny_app_token(request, "ask_question_answer")
     if deny is not None:
         return deny
-    deny = _deny_non_owner(request, "ask_question_answer")
+    deny = await _deny_non_owner(request, "ask_question_answer")
     if deny is not None:
         return deny
     ask_id = request.match_info["ask_id"]

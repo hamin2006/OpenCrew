@@ -206,6 +206,7 @@ def _guarded(handler: Handler) -> Handler:
                 "denied",
                 error=f"non-owner caller (app={request.get('app') or ''})",
             )
+            # Stale-session relabel + 403 via the shared helper's tail pattern.
             stale = stale_owner_session_response(request)
             if stale is not None:
                 return stale

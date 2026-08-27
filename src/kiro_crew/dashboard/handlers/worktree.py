@@ -711,7 +711,7 @@ async def api_worktree_create(request: web.Request) -> web.Response:
     # Dashboard users only. The allow-list below is built from EVERY slot's
     # project, so an app caller reaching here could create a worktree inside a
     # repository belonging to another app's session.
-    denied = deny_non_dashboard_caller(request, "worktree_create")
+    denied = await deny_non_dashboard_caller(request, "worktree_create")
     if denied is not None:
         return denied
     try:

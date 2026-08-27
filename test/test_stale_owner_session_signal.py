@@ -190,32 +190,35 @@ async def test_owner_matching_caller_is_unaffected(monkeypatch) -> None:
 # ── the sibling owner-gate deny sites the issue enumerates ──────────────────
 
 
-def test_chat_gate_labels_stale_bootstrap_denial() -> None:
+@pytest.mark.asyncio
+async def test_chat_gate_labels_stale_bootstrap_denial() -> None:
     """The Trust/YOLO switch gate (chat mode / slot approve / worktree /
     followup all share ``deny_non_dashboard_caller``)."""
     from kiro_crew.dashboard import chat_handlers as ch
 
     request = _mocked_request()
     with patch.object(ch, "sel", return_value=MagicMock()):
-        resp = ch.deny_non_dashboard_caller(request, "chat_mode")
+        resp = await ch.deny_non_dashboard_caller(request, "chat_mode")
     assert resp is not None and resp.status == 401
 
 
-def test_chat_gate_keeps_generic_denial_for_plain_non_owner() -> None:
+@pytest.mark.asyncio
+async def test_chat_gate_keeps_generic_denial_for_plain_non_owner() -> None:
     from kiro_crew.dashboard import chat_handlers as ch
 
     request = _mocked_request(user="U_SOMEONE_ELSE")
     with patch.object(ch, "sel", return_value=MagicMock()):
-        resp = ch.deny_non_dashboard_caller(request, "chat_mode")
+        resp = await ch.deny_non_dashboard_caller(request, "chat_mode")
     assert resp is not None and resp.status == 403
 
 
-def test_ask_question_gate_labels_stale_bootstrap_denial() -> None:
+@pytest.mark.asyncio
+async def test_ask_question_gate_labels_stale_bootstrap_denial() -> None:
     from kiro_crew.dashboard.handlers import ask_question as aq
 
     request = _mocked_request()
     with patch.object(aq, "sel", return_value=MagicMock()):
-        resp = aq._deny_non_owner(request, "ask_question")
+        resp = await aq._deny_non_owner(request, "ask_question")
     assert resp is not None and resp.status == 401
 
 

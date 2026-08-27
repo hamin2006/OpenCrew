@@ -81,22 +81,9 @@ def _guard(request: web.Request, operation: str) -> Optional[web.Response]:
             },
             status=401,
         )
-    # Denying app tokens alone was not enough. token_auth also mints a dashboard
-    # session token for every *allowed Slack user* (`!dashboard`), and that token
-    # carries request["user"] with an EMPTY request["app"] — so the old
-    # `if request.get("app")` check cleared it, admitting a non-owner human to a
-    # control plane that creates, stops and terminates billable AWS resources on the
-    # OWNER's account. "Owner-only" means the human whose dashboard this is: match the
-    # configured owner via the one shared predicate (`is_owner_dashboard_request` —
-    # exact owner_id match, or a signed local bootstrap subject when no owner is
-    # configured), the same definition ask_question and the source-provider routes
-    # use. This also subsumes the app-token case (an app identity is non-empty, so the
-    # predicate returns False), and it does NOT lock out a genuine single-owner setup:
-    # with no owner configured, the owner's own local token still matches.
+    # Owner gate: delegated to the shared helper's predicate + stale relabel.
     if not is_owner_dashboard_request(request):
         _audit(operation, "denied", error="non-owner rejected")
-        # Deny decision made above; only the response label changes for a
-        # signed pre-owner bootstrap subject (see stale_owner_session_response).
         stale = stale_owner_session_response(request)
         if stale is not None:
             return stale

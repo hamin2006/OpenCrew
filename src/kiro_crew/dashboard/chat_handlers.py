@@ -4678,7 +4678,7 @@ def _deny_cross_app_slot_access(
     return web.json_response({"error": "not found", "code": "slot_not_found"}, status=404)
 
 
-def deny_non_dashboard_caller(request: web.Request, operation: str) -> web.Response | None:
+async def deny_non_dashboard_caller(request: web.Request, operation: str) -> web.Response | None:
     """403 unless this is the dashboard OWNER's own request, else None.
 
     Deny-by-default, matching ``api_chat_slots_model``'s reasoning: the auth
@@ -4704,32 +4704,9 @@ def deny_non_dashboard_caller(request: web.Request, operation: str) -> web.Respo
     """
     if request.get("internal_auth") is True:
         return None
-    # Imported here, not at module scope: source_providers imports chat state
-    # helpers, so a top-level import would close a cycle (same pattern as
-    # api_chat_slots' owner-only check-status gate above).
-    from kiro_crew.dashboard.handlers.source_providers import (
-        is_owner_dashboard_request,
-        stale_owner_session_response,
-    )
+    from kiro_crew.dashboard.handlers._shared import require_owner_dashboard_request
 
-    if not is_owner_dashboard_request(request):
-        try:
-            sel().log_api_access(
-                caller=str(request.get("user") or "anonymous"),
-                operation=operation,
-                outcome="denied",
-                source="dashboard",
-                error="not the dashboard owner",
-            )
-        except Exception:  # pragma: no cover - audit is best-effort
-            logger.debug("SEL audit failed for %s denial", operation, exc_info=True)
-        # Deny decision made above; only the response label changes for a
-        # signed pre-owner bootstrap subject (see stale_owner_session_response).
-        stale = stale_owner_session_response(request)
-        if stale is not None:
-            return stale
-        return web.json_response({"error": "forbidden"}, status=403)
-    return None
+    return await require_owner_dashboard_request(request, operation)
 
 
 async def api_chat_slot_followup(request: web.Request) -> web.Response:
@@ -4744,7 +4721,7 @@ async def api_chat_slot_followup(request: web.Request) -> web.Response:
     per slot: a second call replaces an unacted-on card rather than stacking.
     """
     state: DashboardState = request.app["state"]
-    denied = deny_non_dashboard_caller(request, "chat_slot_followup")
+    denied = await deny_non_dashboard_caller(request, "chat_slot_followup")
     if denied is not None:
         return denied
     name = request.match_info["slot"]
@@ -5480,7 +5457,7 @@ async def api_chat_mode(request: web.Request) -> web.Response:
     pending approval — it preemptively sets the mode for future tools.
     """
     state: DashboardState = request.app["state"]
-    denied = deny_non_dashboard_caller(request, "chat_mode")
+    denied = await deny_non_dashboard_caller(request, "chat_mode")
     if denied is not None:
         return denied
     try:
@@ -5772,7 +5749,7 @@ def _deny_trust_pattern(name: str, request_id: str, action: str, code: str) -> w
 async def api_chat_slot_approve(request: web.Request) -> web.Response:
     """POST /api/chat/slots/{slot}/approve — resolve a pending tool approval."""
     state: DashboardState = request.app["state"]
-    denied = deny_non_dashboard_caller(request, "chat_slot_approve")
+    denied = await deny_non_dashboard_caller(request, "chat_slot_approve")
     if denied is not None:
         return denied
     name = request.match_info["slot"]

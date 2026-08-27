@@ -3483,6 +3483,11 @@ async def api_dashboard_config(request: web.Request) -> web.Response:
         )
         raise
     if request.method == "PUT":
+        from kiro_crew.dashboard.handlers._shared import require_owner_dashboard_request
+
+        owner_denied = await require_owner_dashboard_request(request, "dashboard_config.write")
+        if owner_denied is not None:
+            return owner_denied
         try:
             body = await request.json()
         except Exception:

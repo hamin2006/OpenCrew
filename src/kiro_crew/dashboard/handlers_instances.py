@@ -612,22 +612,11 @@ async def api_instances_search_sessions(request: web.Request) -> web.Response:
     # so it requires the positively-identified OWNER: not an app token, and not
     # a Slack user who minted a dashboard token via `!dashboard` (app == "" but
     # a non-owner subject).
-    from kiro_crew.dashboard.handlers.source_providers import (
-        is_owner_dashboard_request,
-        stale_owner_session_response,
-    )
+    from kiro_crew.dashboard.handlers._shared import require_owner_dashboard_request
 
-    if not is_owner_dashboard_request(request):
-        _audit("search_sessions", "denied", error="non-owner identity rejected")
-        # Deny decision made above; only the response label changes for a signed
-        # pre-owner bootstrap subject (see stale_owner_session_response).
-        stale = stale_owner_session_response(request)
-        if stale is not None:
-            return stale
-        return web.json_response(
-            {"error": "federated session search is owner-only", "code": "owner_only"},
-            status=403,
-        )
+    owner_denied = await require_owner_dashboard_request(request, "search_sessions")
+    if owner_denied is not None:
+        return owner_denied
     state: DashboardState = request.app["state"]
     q = sanitize_string(request.query.get("q", "")).strip()[:256]
     if len(q) < SEARCH_MIN_CHARS:
