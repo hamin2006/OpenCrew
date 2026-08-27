@@ -19,7 +19,9 @@ instance permissions boundary — see the security model below.)
 sibling is `kirocrew cloud iam-policy --instance --posture workload|login`
 and `GET /api/cloud/iam-policy?instance=1&posture=` — never merged into the
 launcher JSON, so an operator cannot paste the instance grant onto the
-launch principal by accident. The Settings → Remote Crew setup tab copies
+launch principal by accident. `--posture` is required with `--instance`
+(CLI exits non-zero; the HTTP API returns 400 `invalid_instance_posture`);
+omitting it is not a workload default. The Settings → Remote Crew setup tab copies
 them as two separately labeled buttons.
 
 `cloud` verbs are **human/installer actions, never LLM/MCP tools**, guarded in

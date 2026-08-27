@@ -380,14 +380,10 @@ def test_login_probe_succeeds_iam_invoke_fails_closed(
 
     data = json.loads((kiro_dir / "kirocrew.json").read_text(encoding="utf-8"))
     servers = data.get("mcpServers") or {}
+    mismatch = [e for e in events if e.get("operation") == "agentcore.posture_mismatch"]
+    assert mismatch, f"expected SEL agentcore.posture_mismatch row in {events!r}"
+    assert mismatch[0].get("outcome") == "denied"
     assert not any("gateway" in name.lower() for name in servers)
-    mismatch = [
-        e
-        for e in events
-        if e.get("operation") == "agentcore.posture_mismatch"
-        or e.get("event_type") == "agentcore.posture_mismatch"
-    ]
-    assert mismatch, f"expected agentcore.posture_mismatch in {events!r}"
 
 
 @pytest.mark.asyncio
@@ -435,3 +431,14 @@ def test_cli_iam_policy_instance_flag(capsys: pytest.CaptureFixture[str]) -> Non
     out = capsys.readouterr().out
     assert "GetWorkloadAccessTokenForJWT" in out
     assert "DenyUserIdAndIamGateway" in out
+
+
+def test_cli_iam_policy_instance_requires_posture(capsys: pytest.CaptureFixture[str]) -> None:
+    """``--instance`` without ``--posture`` must not emit the privileged sibling."""
+    from kiro_crew import cli_cloud
+
+    ns = type("NS", (), {"cloud_action": "iam-policy", "instance": True, "posture": None})()
+    assert cli_cloud.handle_cloud(ns) != 0
+    captured = capsys.readouterr()
+    assert "InvokeGateway" not in captured.out
+    assert "InvokeGateway" not in captured.err

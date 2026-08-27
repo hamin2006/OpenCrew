@@ -1862,8 +1862,8 @@ Examples:
     _c_iam.add_argument(
         "--posture",
         choices=("workload", "login"),
-        default="workload",
-        help="Instance posture when --instance is set (default: workload)",
+        default=None,
+        help="Instance posture (required with --instance)",
     )
     _c_boundary = cloud_sub.add_parser(
         "iam-boundary",

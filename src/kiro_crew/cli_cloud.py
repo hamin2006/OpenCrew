@@ -328,9 +328,11 @@ def _cloud_destroy(args: argparse.Namespace) -> int:
 
 def _cloud_iam_policy(args: argparse.Namespace) -> int:
     if getattr(args, "instance", False):
-        posture = getattr(args, "posture", None) or "workload"
+        posture = (getattr(args, "posture", None) or "").strip()
         if posture not in ("workload", "login"):
-            ui.fail("instance posture must be workload or login")
+            # No privileged-sibling default: omitting --posture used to emit
+            # the workload document (InvokeGateway). Match the HTTP 400.
+            ui.fail("--posture is required with --instance (workload or login)")
             return 1
         print(iam.agentcore_instance_policy_json(posture))
         return 0
