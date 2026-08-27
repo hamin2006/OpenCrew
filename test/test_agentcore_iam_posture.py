@@ -53,6 +53,12 @@ def _enable_agentcore(posture: str) -> None:
     )
 
 
+def _enable_agentcore_policy_only(posture: str) -> None:
+    """Capability + posture on the ceiling; Default identity stays off."""
+    base = build_default_context(KiroCrewConfig())
+    set_context(dataclasses.replace(base, governance=_agentcore_ceiling(posture=posture)))
+
+
 def _statement_by_sid(doc: dict[str, Any], sid: str) -> dict[str, Any]:
     return next(s for s in doc["Statement"] if s["Sid"] == sid)
 
@@ -261,6 +267,52 @@ def test_login_rebuild_withholds_kiro_global(
     assert "dummy-crew-store" not in servers
     assert "dummy-leftover" not in servers
     assert not any("gateway" in name.lower() for name in servers)
+
+
+def test_login_rebuild_withholds_app_mcp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from kiro_crew.agent import rebuild_agent_config
+
+    kiro_dir = _seed_rebuild_sources(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "kiro_crew.agent._collect_app_mcp_servers",
+        lambda: {"dummyapp:srv": {"command": "dummy-srv"}},
+    )
+    try:
+        _enable_agentcore("login")
+        rebuild_agent_config()
+    finally:
+        reset_context()
+
+    data = json.loads((kiro_dir / "kirocrew.json").read_text(encoding="utf-8"))
+    servers = data.get("mcpServers") or {}
+    assert "dummyapp:srv" not in servers
+    assert "kirocrew-core" in servers
+    assert "kirocrew-cron" in servers
+    assert not any("gateway" in name.lower() for name in servers)
+
+
+def test_login_rebuild_withholds_without_companion_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kiro_crew.agent import rebuild_agent_config
+    from kiro_crew.platform.defaults import DefaultAgentIdentityProvider
+
+    kiro_dir = _seed_rebuild_sources(tmp_path, monkeypatch)
+    try:
+        _enable_agentcore_policy_only("login")
+        assert not DefaultAgentIdentityProvider().enabled()
+        rebuild_agent_config()
+    finally:
+        reset_context()
+
+    data = json.loads((kiro_dir / "kirocrew.json").read_text(encoding="utf-8"))
+    servers = data.get("mcpServers") or {}
+    assert "dummy-kiro-global" not in servers
+    assert "dummy-seam-global" not in servers
+    assert "dummy-crew-store" not in servers
+    assert "dummy-leftover" not in servers
+    assert "kirocrew-core" in servers
+    assert "kirocrew-cron" in servers
 
 
 def test_workload_rebuild_still_merges_kiro_global(

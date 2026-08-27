@@ -857,28 +857,15 @@ def _extra_mcp_servers() -> dict[str, dict]:
     return dict(extra) if extra else {}
 
 
-def _agent_identity_enabled() -> bool:
-    """Whether the composed agent-identity seam is on.
+def _agentcore_capability_permitted() -> bool:
+    """Whether the governance ceiling permits ``capabilities.agentcore``.
 
-    True only when the adapter is on AND governance permits
-    ``capabilities.agentcore`` AND the ceiling stores a known posture.
-    Standalone Default returns False without consulting governance, so
-    rebuild stays byte-identical. An omitted capability is ungoverned
-    (permitted), so the known-posture conjunct is what keeps a forced-on
-    adapter off when no row is present. A transient adapter/governance
-    error degrades to False (never to enabled) via ``safe_context_call``.
-    ``PlatformCompositionError`` still aborts.
+    Independent of the CPP adapter. An omitted capability is ungoverned
+    (permitted); a transient lookup degrades to False. Used by login
+    withhold (capability + posture only) and by the three-conjunct
+    identity probe (adapter AND this AND known posture).
     """
-    adapter_on = bool(
-        safe_context_call(
-            lambda: current_context().agent_identity.enabled(),
-            fallback=False,
-            log_message="agent_identity.enabled lookup failed; treating as disabled",
-        )
-    )
-    if not adapter_on:
-        return False
-    permitted = bool(
+    return bool(
         safe_context_call(
             lambda: getattr(
                 governance_permits(
@@ -894,7 +881,31 @@ def _agent_identity_enabled() -> bool:
             log_message="agentcore governance lookup failed; treating as disabled",
         )
     )
-    if not permitted:
+
+
+def _agent_identity_enabled() -> bool:
+    """Whether the composed agent-identity seam is on.
+
+    True only when the adapter is on AND governance permits
+    ``capabilities.agentcore`` AND the ceiling stores a known posture.
+    Standalone Default returns False without consulting governance, so
+    Gateway/token work stays off. Login MCP withhold is a different
+    predicate (capability + posture only). An omitted capability is
+    ungoverned (permitted), so the known-posture conjunct is what keeps
+    a forced-on adapter off when no row is present. A transient
+    adapter/governance error degrades to False (never to enabled) via
+    ``safe_context_call``. ``PlatformCompositionError`` still aborts.
+    """
+    adapter_on = bool(
+        safe_context_call(
+            lambda: current_context().agent_identity.enabled(),
+            fallback=False,
+            log_message="agent_identity.enabled lookup failed; treating as disabled",
+        )
+    )
+    if not adapter_on:
+        return False
+    if not _agentcore_capability_permitted():
         return False
     return bool(
         safe_context_call(
@@ -908,7 +919,7 @@ def _agent_identity_enabled() -> bool:
 def _note_agent_identity_if_enabled() -> None:
     """Live consumption of ``ctx.agent_identity``; no-op when the Default is off.
 
-    Later work keys Gateway MCP / login-mode withhold on this probe. Reading
+    Later Gateway/token work keys on this three-conjunct probe. Reading
     ``status()`` here is display-only and uses an empty-dict fallback so a
     raised adapter cannot degrade to "enabled".
     """
@@ -926,10 +937,12 @@ def _login_mcp_withhold() -> bool:
     """Emit-time gate: withhold non-managed MCP when AgentCore posture is login.
 
     Same shape as ``kirocrew-computer``'s ``spec_gate``: consulted at rebuild
-    emission, not by mutating source files. True only when the identity
-    capability is on AND the ceiling posture is ``login``.
+    emission, not by mutating source files. True when the capability is
+    permitted AND the ceiling posture is ``login`` — the companion adapter
+    does not have to be on. Gateway/token work stays behind
+    ``_agent_identity_enabled()``.
     """
-    if not _agent_identity_enabled():
+    if not _agentcore_capability_permitted():
         return False
     return bool(
         safe_context_call(
@@ -3513,9 +3526,10 @@ def rebuild_agent_config(*, clean: bool = False) -> Path:
     login_withhold = _login_mcp_withhold()
     if login_withhold:
         # Login posture is an emit-time spec_gate (same as kirocrew-computer):
-        # withhold Kiro-global, seam-global, crew-store, and leftover
-        # non-managed merge-base entries. Managed kirocrew-* still emit.
-        # A Gateway URL-only spec is not invented here.
+        # withhold Kiro-global, seam-global, crew-store, leftover
+        # non-managed merge-base entries, and app-contributed servers.
+        # Managed kirocrew-* still emit. A Gateway URL-only spec is not
+        # invented here.
         _strip_leftover_non_managed_mcp(config, managed_names)
         _record_login_invoke_probe()
 
@@ -3532,17 +3546,21 @@ def rebuild_agent_config(*, clean: bool = False) -> Path:
     # had just stripped (the ceiling now governs that server) lost to the stale
     # grant, the tightening never reached an existing config, and those tools
     # kept skipping the PreToolUse gate.
-    for _app_srv, _app_spec in _collect_app_mcp_servers().items():
-        if _app_srv not in managed_names:
-            config.setdefault("mcpServers", {})[_app_srv] = _app_spec
-            # EXPOSE it: kiro-cli connects entries declared in `mcpServers`, but
-            # an unreferenced server contributes no tools to the agent. `tools`
-            # is the unconditional exposure list (the final
-            # dedup below removes any duplicate); auto-approve stays governed —
-            # the spec's `autoApprove` was already ceiling-filtered in
-            # _collect_app_mcp_servers, and the final allowedTools pass covers the
-            # @ref if it ever lands there.
-            config.setdefault("tools", []).append(f"@{_app_srv}")
+    #
+    # Login withhold skips this loop: the emitted spec is only managed
+    # kirocrew-* (plus a later URL-only Gateway). Apps are neither.
+    if not login_withhold:
+        for _app_srv, _app_spec in _collect_app_mcp_servers().items():
+            if _app_srv not in managed_names:
+                config.setdefault("mcpServers", {})[_app_srv] = _app_spec
+                # EXPOSE it: kiro-cli connects entries declared in `mcpServers`,
+                # but an unreferenced server contributes no tools to the agent.
+                # `tools` is the unconditional exposure list (the final
+                # dedup below removes any duplicate); auto-approve stays
+                # governed — the spec's `autoApprove` was already
+                # ceiling-filtered in _collect_app_mcp_servers, and the final
+                # allowedTools pass covers the @ref if it ever lands there.
+                config.setdefault("tools", []).append(f"@{_app_srv}")
 
     shared_mcp: dict[str, Any] = {}
     extra_shared_mcp: dict[str, dict] = {}
