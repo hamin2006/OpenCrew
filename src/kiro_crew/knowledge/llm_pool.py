@@ -22,6 +22,15 @@ try:
 except ImportError:
     AcpClient = None  # type: ignore[assignment,misc]
 
+try:
+    from kiro_crew.acp.runtime import AcpRuntime
+    from kiro_crew.acp.session_provider import AcpSessionProvider
+    from kiro_crew.acp.types import ACP_BACKEND_KAS
+except ImportError:
+    AcpRuntime = None  # type: ignore[assignment,misc]
+    AcpSessionProvider = None  # type: ignore[assignment,misc]
+    ACP_BACKEND_KAS = ""
+
 # Sweep-protection shield for AcpClient-backed workers. These are direct,
 # long-lived AcpClient sessions (not SessionMap sessions / warm-pool providers),
 # so the gateway's periodic orphan sweep can't see them via _collect_active_pids
@@ -118,6 +127,13 @@ def _get_provider_type(config: Optional[dict] = None) -> str:
     data = _read_config() if config is None else config
     provider = _section(data, "agent").get("provider", "acp")
     return provider if isinstance(provider, str) and provider else "acp"
+
+
+def _get_acp_backend(config: Optional[dict] = None) -> str:
+    """Configured ACP backend ("" = kiro-cli, "kas" = KAS/opencode)."""
+    data = _read_config() if config is None else config
+    backend = _section(data, "agent").get("acp_backend", "")
+    return backend if isinstance(backend, str) and backend else ""
 
 
 def _get_sandbox_mode(config: Optional[dict] = None) -> str:
@@ -315,6 +331,107 @@ class AcpWorker(Worker):
         """
         await self.start()
         self.calls_since_reset = 0
+
+
+class KasWorker(Worker):
+    """Long-lived opencode (kas) ACP session on a dedicated runtime.
+
+    AcpClient can only spawn kiro-cli, so on the kas backend the
+    knowledge worker is a dedicated AcpRuntime (one opencode acp
+    process) hosting one kirocrew-knowledge session — the same
+    machinery the gateway's own sessions use. The runtime owns the
+    process; shutdown() kills it.
+    """
+
+    def __init__(self, *, sandbox_mode: Optional[str] = None) -> None:
+        self._provider: Optional[AcpSessionProvider] = None
+        self._runtime: Optional[AcpRuntime] = None
+        # Config carrier only — never spawned (mirrors
+        # providers.acp._start_kiro_runtime_impl).
+        self._client: Optional[AcpClient] = None
+        self._sandbox_mode = sandbox_mode
+
+    async def start(self) -> None:
+        if self._provider is not None:
+            await self.shutdown()
+        if AcpRuntime is None or AcpSessionProvider is None:
+            raise RuntimeError("kiro_crew.acp runtime not available")
+        sandbox_mode = (
+            self._sandbox_mode
+            if self._sandbox_mode is not None
+            else await asyncio.to_thread(_get_sandbox_mode)
+        )
+        logger.info("KasWorker: starting with agent=%s", AGENT_NAME)
+        self._client = AcpClient(
+            agent=AGENT_NAME, sandbox_mode=sandbox_mode, audit_source="subagent"
+        )
+        runtime = AcpRuntime(
+            work_dir=self._client._work_dir,
+            agent=getattr(self._client, "_agent", None) or "kirocrew",
+            sandbox_mode=sandbox_mode,
+            extra_env=getattr(self._client, "_extra_env", None) or {},
+            mcp_gateway_overlay=getattr(self._client, "_mcp_gateway_overlay", None),
+            mcp_gateway_settings_mcp_json=getattr(
+                self._client, "_mcp_gateway_settings_mcp_json", None
+            ),
+            mcp_gateway_socket=getattr(self._client, "_mcp_gateway_socket", None),
+            acp_backend=ACP_BACKEND_KAS,
+            crew_agent=None,
+        )
+        await runtime.spawn()
+        handle = await runtime.create_session(
+            cwd=self._client._work_dir,
+            agent=AGENT_NAME,
+        )
+        self._runtime = runtime
+        self._provider = AcpSessionProvider(handle, runtime)
+        logger.info(
+            "KasWorker: ready (agent=%s, pid=%s)",
+            AGENT_NAME,
+            getattr(runtime, "_pid", "unknown"),
+        )
+
+    async def send_message(self, prompt: str, timeout: float = DEFAULT_TIMEOUT) -> str:
+        if self._provider is None:
+            await self.start()
+        assert self._provider is not None
+        from kiro_crew.llm_helpers import stream_and_collect
+
+        return await asyncio.wait_for(
+            stream_and_collect(self._provider, prompt), timeout=timeout
+        )
+
+    async def shutdown(self) -> None:
+        if self._provider is not None:
+            try:
+                await self._provider.shutdown()
+            except Exception:
+                logger.debug("KasWorker: session shutdown failed", exc_info=True)
+            self._provider = None
+        if self._runtime is not None:
+            try:
+                await self._runtime.kill()
+            except Exception:
+                logger.debug("KasWorker: runtime kill failed", exc_info=True)
+            self._runtime = None
+        self._client = None
+
+    def is_alive(self) -> bool:
+        return (
+            self._runtime is not None
+            and self._provider is not None
+            and self._runtime.is_alive()
+        )
+
+    def context_pct(self) -> float:
+        pct = getattr(self._provider, "context_usage_pct", None)
+        return float(pct()) if callable(pct) else 0.0
+
+    async def reset_conversation(self) -> None:
+        """Drop the accumulated transcript; fresh session on the same runtime."""
+        if self._provider is None:
+            return
+        await self._provider.new_conversation()
 
 
 class CCWorker(Worker):
@@ -544,6 +661,11 @@ class LLMPool:
         """Create and start a new worker based on provider type."""
         if self._provider_type == "claude_code":
             worker: Worker = CCWorker()
+        elif _get_acp_backend() == ACP_BACKEND_KAS:
+            # kas (opencode) backend: AcpClient can only spawn kiro-cli,
+            # so route the worker through a dedicated AcpRuntime + session
+            # — the same path the gateway's own sessions use.
+            worker = KasWorker(sandbox_mode=self._sandbox_mode)
         else:
             worker = AcpWorker(sandbox_mode=self._sandbox_mode)
         await worker.start()
