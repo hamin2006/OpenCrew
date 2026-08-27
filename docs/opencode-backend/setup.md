@@ -35,6 +35,19 @@ re-apply tool.
 
 All of this lives outside the package and survives any kirocrew update:
 
+- **Frontend bundle** — `src/kiro_crew/static/dist/` is a **build artifact, not
+  committed** (gitignored). After cloning the branch, restore it from a wheel:
+  ```sh
+  pip download --no-deps "https://download.crew.kiro.dev/cli/stable/0.3.0/kirocrew-0.3.0-py3-none-any.whl#sha256=<sha256 from SHA256SUMS>" -d /tmp/kw
+  unzip -o /tmp/kw/*.whl "kiro_crew/static/*" -d /tmp/kw-x && cp -r /tmp/kw-x/kiro_crew/static ~/KiroCrew/src/kiro_crew/
+  ```
+  (or `make build` from the repo root). Without it the gateway serves a
+  broken dashboard — `kirocrew token` prints the "stale dashboard" warning.
+- **`.venv`** — the source-checkout wrapper (`~/.local/bin/kirocrew` →
+  `~/KiroCrew/bin/kirocrew`) requires a bundled venv; symlink the real one:
+  ```sh
+  ln -sfn ~/.kiro/crew-venv ~/KiroCrew/.venv
+  ```
 - **`/etc/kirocrew/kirocrew.env`**
   ```
   KIROCREW_KAS_NODE=/home/<user>/.local/bin/kiro-kas-shim.sh
