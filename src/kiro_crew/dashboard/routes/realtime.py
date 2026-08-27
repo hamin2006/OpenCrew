@@ -65,6 +65,12 @@ def register(app: web.Application) -> None:
         "/api/kiro-prerequisite/repair-specs",
         handlers.api_kiro_prerequisite_repair_specs,
     )
+    # KAS-mode interactive login (no kiro-cli): status is a read; the device-code
+    # begin/poll/logout mutations are POSTs so they stay origin-checked and audited.
+    app.router.add_get("/api/kas-login", handlers.api_kas_login_status)
+    app.router.add_post("/api/kas-login/device", handlers.api_kas_login_begin_device)
+    app.router.add_post("/api/kas-login/poll", handlers.api_kas_login_poll)
+    app.router.add_post("/api/kas-login/logout", handlers.api_kas_login_logout)
     app.router.add_get("/api/governance/channels", handlers.api_governance_channels)
 
     # Suggestions (pre-computed contextual prompts)

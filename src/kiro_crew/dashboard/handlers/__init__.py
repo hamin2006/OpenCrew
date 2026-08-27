@@ -182,6 +182,12 @@ from kiro_crew.dashboard.handlers.hooks import (  # noqa: E402, F401
     api_webhooks,
     api_webhooks_switch,
 )
+from kiro_crew.dashboard.handlers.kas_login import (  # noqa: E402, F401
+    api_kas_login_begin_device,
+    api_kas_login_logout,
+    api_kas_login_poll,
+    api_kas_login_status,
+)
 from kiro_crew.dashboard.handlers.kiro_prerequisite import (  # noqa: E402, F401
     api_kiro_prerequisite_repair_specs,
     api_kiro_prerequisite_status,
