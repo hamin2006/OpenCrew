@@ -929,140 +929,105 @@ def _wrap_list_models_argv(argv: list[str]) -> tuple[list[str], str | None]:
 
 
 async def api_models(request: web.Request) -> web.Response:
-    """GET /api/models — list available models from the live kiro-cli ACP session."""
-    # Signed-out gateways must never reach the spawn below. kiro-cli auto-opens
-    # an interactive browser login for ANY subcommand run unauthenticated
-    # (--no-interactive does not suppress it, and there is no opt-out env var),
-    # and the frontend polls this endpoint every 8s while the model list is
-    # degraded — which is exactly the signed-out state. Ungated, that pairing
-    # opened a browser window every 8s indefinitely. The 503 is the same
-    # degraded response the timeout/unresolved branches already return, so the
-    # client contract is unchanged; only the subprocess is skipped.
-    blocked = await reject_if_kiro_unverified(request)
-    if blocked is not None:
-        return blocked
-    kiro_bin: str | None = None
+    """GET /api/models — list available models from the opencode ACP backend.
+
+    opencode fork: the agent backend is opencode, so the model catalog is read
+    from ``opencode models --verbose`` (one JSON object per model) instead of
+    ``kiro-cli chat --list-models``. opencode never auto-opens a browser for
+    this command, so the kiro-unverified gate is not needed here.
+    """
+
+    # Display names for opencode provider IDs shown in the picker.
+    _PROVIDER_DISPLAY = {
+        "opencode": "OpenCode",
+        "opencode-go": "OpenCode Go",
+        "deepseek": "DeepSeek",
+        "openai": "OpenAI",
+        "groq": "Groq",
+        "moonshotai": "Moonshot AI",
+        "github-copilot": "GitHub Copilot",
+    }
+
+    opencode_bin = "/home/harsh-amin/.opencode/bin/opencode"
+    argv = [opencode_bin, "models", "--verbose"]
     try:
-        from kiro_crew.acp.client import (  # noqa: F811
-            _resolve_kiro_bin_for_spawn,
-            _resolve_ssh_auth_sock,
+        proc = await create_subprocess_limited(
+            *argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
         )
-        from kiro_crew.env import augmented_path  # noqa: F811
-
-        kiro_bin = await _resolve_kiro_bin_for_spawn()
-        if not kiro_bin:
-            # Degraded (binary not resolved yet), NOT a genuine "zero models"
-            # result. Return 503 so the client retries instead of caching an
-            # empty list — a cached [] renders an empty picker that only a
-            # manual page refresh recovers from.
-            return web.json_response({"error": "kiro binary not resolved"}, status=503)
-        argv = [kiro_bin, "chat", "--list-models", "--format", "json", "--no-interactive"]
-        # Mirror AcpClient._spawn() sandbox: wrap_argv + env + process isolation.
-        # Note: AcpClient._spawn() is for interactive ACP sessions (stdin/stdout
-        # pipes); this is a one-shot read-only command, so we replicate the
-        # sandbox setup directly.  See the security-controls rule.
-        #
-        # The configured tier is passed EXPLICITLY rather than left to
-        # wrap_argv's "auto" parameter default, so this endpoint can never ask
-        # for stricter isolation than the chat spawn of the same binary. It
-        # matters wherever the operator set agent.sandbox="off" (deferring
-        # isolation to kiro-cli's own internal sandbox) on a host with no backend
-        # — any Windows host, macOS >= 26: chat runs, while the default-mode wrap
-        # here fail-closed and answered 503 on every 8s poll. The frontend reads
-        # that as "degraded" and serves its auto-only fallback list, so the picker
-        # showed exactly one entry. Same fix, same reason as the `_bg` session in
-        # session.py.
-        #
-        # OFF the loop: `configured_sandbox_mode()` stats (and on a cache miss
-        # re-reads + revalidates) config.json, and `wrap_argv` -> `detect_backend`
-        # can cold-probe the backend with a synchronous
-        # `subprocess.run(..., timeout=5)`. This endpoint is polled every 8s while
-        # the model list is degraded, so leaving either on the loop stalls chat,
-        # cron and the liveness heartbeat on exactly the host where the probe is
-        # slowest. Both reads run in the worker, so the mode is resolved there
-        # too rather than passed in.
-        argv, cleanup = await asyncio.get_running_loop().run_in_executor(
-            subprocess_executor(), _wrap_list_models_argv, argv
-        )
-        argv = cgroup_scope_argv(argv)  # cgroup DoS ceiling
         try:
-            env = {**os.environ}
-            env["PATH"] = augmented_path(env.get("PATH", ""))
-            _resolve_ssh_auth_sock(env)
-            proc = await create_subprocess_limited(
-                *argv,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                start_new_session=True,
-                env=env,
-            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+        except asyncio.TimeoutError:
             try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
-            except asyncio.TimeoutError:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            await proc.communicate()
+            logger.warning("api_models: opencode models timed out; returning 503")
+            return web.json_response({"error": "model list timed out"}, status=503)
+    except Exception:
+        logger.warning("api_models: opencode models spawn failed", exc_info=True)
+        return web.json_response({"error": "model list command failed"}, status=503)
+
+    if proc.returncode != 0:
+        stderr_tail = stderr.decode(errors="replace").strip()[:_MODEL_LIST_STDERR_TAIL_CHARS]
+        logger.warning(
+            "api_models: opencode models exited %s: %s; returning 503",
+            proc.returncode,
+            stderr_tail or "<no stderr>",
+        )
+        return web.json_response({"error": "model list command failed"}, status=503)
+
+    if not stdout.strip():
+        logger.warning("api_models: opencode models returned empty output; returning 503")
+        return web.json_response({"error": "model list returned empty output"}, status=503)
+
+    try:
+        models: list[dict] = []
+        buf = ""
+        for line in stdout.decode(errors="replace").splitlines():
+            if line.lstrip().startswith("{"):
+                buf = line
+                continue
+            if buf:
+                buf += "\n" + line
                 try:
-                    proc.kill()
-                except ProcessLookupError:
-                    pass
-                await proc.communicate()
-                # A cold CLI spawn exceeded the timeout. This is the common
-                # cause of the "picker is empty until I refresh" symptom: a
-                # slow first `--list-models` spawn returning [] (HTTP 200) would
-                # be cached by the client as a successful empty result. Return
-                # 503 instead so React Query retries with backoff and the
-                # picker self-heals without a manual refresh.
-                logger.warning("api_models: --list-models timed out; returning 503")
-                return web.json_response({"error": "model list timed out"}, status=503)
-        finally:
-            if cleanup and callable(cleanup):
-                cleanup()
+                    m = json.loads(buf)
+                except json.JSONDecodeError:
+                    continue
+                buf = ""
+                if not isinstance(m, dict):
+                    continue
+                mid = m.get("id")
+                pid = m.get("providerID")
+                if not isinstance(mid, str) or not isinstance(pid, str):
+                    continue
+                limit = m.get("limit") or {}
+                ctx = limit.get("context") if isinstance(limit, dict) else None
+                provider_display = _PROVIDER_DISPLAY.get(pid, pid)
+                models.append(
+                    {
+                        "model_id": f"{pid}/{mid}",
+                        "model_name": f"{m.get('name') or mid} ({provider_display})",
+                        "context_window_tokens": ctx if isinstance(ctx, int) else None,
+                    }
+                )
+    except Exception:
+        logger.warning("api_models: failed parsing opencode models output", exc_info=True)
+        return web.json_response({"error": "model list returned invalid JSON"}, status=503)
+    if not models:
+        logger.warning("api_models: opencode models returned no parseable models; returning 503")
+        return web.json_response({"error": "model list returned an invalid payload"}, status=503)
 
-        if proc.returncode != 0:
-            from kiro_crew.platform import redact_via_context  # noqa: F811
-
-            stderr_tail = stderr.decode(errors="replace").strip()
-            stderr_tail = redact_via_context(stderr_tail)[-_MODEL_LIST_STDERR_TAIL_CHARS:]
-            logger.warning(
-                "api_models: --list-models exited %s: %s; returning 503",
-                proc.returncode,
-                stderr_tail or "<no stderr>",
-            )
-            return web.json_response({"error": "model list command failed"}, status=503)
-
-        if not stdout.strip():
-            logger.warning("api_models: --list-models returned empty output; returning 503")
-            return web.json_response({"error": "model list returned empty output"}, status=503)
-
-        try:
-            data = json.loads(stdout.decode(errors="replace"))
-        except json.JSONDecodeError as exc:
-            logger.warning(
-                "api_models: --list-models returned invalid JSON (%s); returning 503",
-                exc,
-            )
-            return web.json_response({"error": "model list returned invalid JSON"}, status=503)
-        if not isinstance(data, dict) or not isinstance(data.get("models"), list):
-            logger.warning("api_models: --list-models returned an invalid payload; returning 503")
-            return web.json_response(
-                {"error": "model list returned an invalid payload"}, status=503
-            )
-        models = data["models"]
-        # Seed the central window authority from kiro's authoritative structured
-        # 'context_window_tokens' field (keyed by model_id/model_name). This is
-        # the ONE place these rows enter the system; every other consumer (the
-        # ACP backfill, the context-budget scaler, the live meter) then resolves
-        # through model_registry.model_window() rather than re-reading kiro. The
-        # in-memory update is synchronous (cheap dict mutation); only the disk
-        # persist is offloaded to an executor so the event loop never blocks on
-        # filesystem I/O (no blocking call on the event loop).
-        #
-        # This fork keeps kiro's bare-dotted ids as the picker WIRE FORMAT
-        # (guarded by _model_rejected_reason / api_chat_slot_model, which rejects
-        # canonical registry keys the ACP CLI can't accept). The upstream
-        # registry-key canonicalization is deliberately NOT ported — it is
-        # incompatible with this fork's _model_rejected_reason guard. The window
-        # seeding above uses kiro's authoritative context_window_tokens to give
-        # the backfill real GPT/DeepSeek/Qwen windows, independent of the
-        # wire-format choice.
+    try:
+        # Seed the central window authority from opencode's authoritative
+        # context_window_tokens (mapped from limit.context above, keyed by
+        # model_id/model_name). This is the ONE place these rows enter the
+        # system; every other consumer (the ACP backfill, the context-budget
+        # scaler, the live meter) then resolves through
+        # model_registry.model_window() rather than re-reading the catalog.
         if model_registry.refresh_kiro_windows(models):
             await asyncio.get_running_loop().run_in_executor(
                 maintenance_executor(), model_registry.persist_kiro_windows
