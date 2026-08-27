@@ -85,20 +85,40 @@ def derive_session_principal(
     )
 
 
+def is_injected_envelope(text: str) -> bool:
+    """True when *text* is a cron / subagent-completion injection, not a user."""
+    return (
+        text.startswith(_CRON_NOTIFY_PREFIX)
+        or text.startswith(SUBAGENT_COMPLETION_PREFIX)
+        or text.startswith(SUBAGENT_BATCH_COMPLETION_PREFIX)
+    )
+
+
 def derive_session_principal_for_injected(text: str) -> SessionPrincipal | None:
     """Injected envelopes are not a user. Always ``None`` for those prefixes.
 
     ``[Cron notification from "job"]`` and ``[Subagent completion event]``
     arrive from automation, not from a human. Do not mint a user-bound
-    principal (or later a user-bound token) for them.
+    principal (or later a user-bound token) for them. For any other text
+    this helper is not the identity source — callers must not treat a
+    ``None`` here as "skip bind" unless :func:`is_injected_envelope` is
+    also true.
     """
-    if text.startswith(_CRON_NOTIFY_PREFIX):
-        return None
-    if text.startswith(SUBAGENT_COMPLETION_PREFIX):
-        return None
-    if text.startswith(SUBAGENT_BATCH_COMPLETION_PREFIX):
+    if is_injected_envelope(text):
         return None
     return None
+
+
+def principal_bind_kwargs(message: str, *, surface: str, raw_id: str) -> dict[str, str]:
+    """``surface`` / ``raw_id`` for ``publish_turn_identity``, or ``{}``.
+
+    Empty when *message* is an injected envelope: ``derive_session_principal_for_injected``
+    returns ``None`` (not a user), so the caller publishes the pid sidecar
+    only. An ordinary user turn still binds.
+    """
+    if is_injected_envelope(message) and derive_session_principal_for_injected(message) is None:
+        return {}
+    return {"surface": surface, "raw_id": raw_id}
 
 
 def inherit_parent_principal(parent: SessionPrincipal, *, session_key: str) -> SessionPrincipal:

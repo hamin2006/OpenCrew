@@ -248,3 +248,51 @@ async def test_publish_turn_identity_without_raw_id_does_not_bind() -> None:
     sessions = _RecordingSessions()
     await publish_turn_identity(sessions, "dashboard:1")
     assert sessions.principals == {}
+
+
+def test_cron_wrapped_message_does_not_bind_dashboard_owner() -> None:
+    from kiro_crew.platform.agent_identity import principal_bind_kwargs
+
+    kwargs = principal_bind_kwargs(
+        '[Cron notification from "job"]\nbuild failed',
+        surface="dashboard",
+        raw_id="alice",
+    )
+    assert kwargs == {}
+
+
+def test_subagent_completion_does_not_bind_dashboard_owner() -> None:
+    from kiro_crew.platform.agent_identity import principal_bind_kwargs
+
+    kwargs = principal_bind_kwargs(
+        SUBAGENT_COMPLETION_PREFIX + "\nAgent done",
+        surface="dashboard",
+        raw_id="alice",
+    )
+    assert kwargs == {}
+
+
+def test_ordinary_user_message_still_binds() -> None:
+    from kiro_crew.platform.agent_identity import principal_bind_kwargs
+
+    kwargs = principal_bind_kwargs("please fix the build", surface="dashboard", raw_id="alice")
+    assert kwargs == {"surface": "dashboard", "raw_id": "alice"}
+
+
+@pytest.mark.asyncio
+async def test_cron_wrapped_publish_does_not_store_dashboard_owner() -> None:
+    from kiro_crew.messaging.identity import publish_turn_identity
+    from kiro_crew.platform.agent_identity import principal_bind_kwargs
+
+    sessions = _RecordingSessions()
+    await publish_turn_identity(
+        sessions,
+        "dashboard:1",
+        **principal_bind_kwargs(
+            '[Cron notification from "job"]',
+            surface="dashboard",
+            raw_id="alice",
+        ),
+    )
+    assert sessions.principals == {}
+    assert not any(p.subject == "dashboard+alice" for p in sessions.principals.values())

@@ -189,6 +189,7 @@ from kiro_crew.mcp_discovery import kirocrew_managed_names
 from kiro_crew.members import record_activity
 from kiro_crew.messaging.display_safety import redact_for_display
 from kiro_crew.messaging.identity import publish_turn_identity
+from kiro_crew.platform.agent_identity import principal_bind_kwargs
 from kiro_crew.messaging.link import (
     CHAT_TYPE_DIRECT,
     SLACK_NAMESPACE,
@@ -5370,13 +5371,17 @@ async def _run_chat(
         # X-Session-Key; one shared writer lives in messaging.identity.
         # Also the AgentCore principal hook: dashboard surface + the already-
         # known owner (or the local OS user on OSS token auth). Never a
-        # client-supplied userId.
+        # client-supplied userId. Injected cron / subagent-completion
+        # envelopes are not a user — pid publish only (no surface/raw_id).
         _principal_raw_id = state.owner_id or _dashboard_local_owner()
         await publish_turn_identity(
             state.sessions,
             session_key,
-            surface="dashboard",
-            raw_id=_principal_raw_id,
+            **principal_bind_kwargs(
+                message,
+                surface="dashboard",
+                raw_id=_principal_raw_id,
+            ),
         )
 
         # ── @prompt expansion: resolve @name to SOP/prompt content ──
