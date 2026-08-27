@@ -1262,9 +1262,15 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
 
         mode = args["mode"]
         payload = args["payload"]
-        result = conductor_scripts.ledger_mode(mode, payload)
         import json as _json
 
+        try:
+            result = conductor_scripts.ledger_mode(mode, payload)
+        except Exception as exc:
+            return _json.dumps(
+                {"ok": False, "error": {"code": "internal_error", "detail": str(exc)}},
+                indent=2,
+            )
         return _json.dumps(result, indent=2)
 
     return f"Error: unknown tool '{name}'"
