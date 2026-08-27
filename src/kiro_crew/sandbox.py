@@ -2624,12 +2624,11 @@ def _warn_mode_off_unconfined(argv: list[str], is_kiro_spawn: bool) -> None:
             return
         _warned_set.add("linux")
         logger.warning(
-            "SECURITY: agent.sandbox='off' on Linux — there is no kiro-cli "
-            "delegation mechanism on this platform, so the agent subprocess "
-            "runs with NO OS-level confinement. ~/.aws, ~/.ssh and other "
-            "secrets are readable by it and only the bypassable app-level "
-            "security.py checks remain. Set agent.sandbox='auto' to engage "
-            "namespace isolation. Command: %s",
+            "SECURITY: agent.sandbox='off' on Linux — the agent subprocess "
+            "(kiro-cli or the opencode/kas node) runs with NO OS-level "
+            "confinement. ~/.aws, ~/.ssh and other secrets are readable by it "
+            "and only the bypassable app-level security.py checks remain. Set "
+            "agent.sandbox='auto' to engage namespace isolation. Command: %s",
             argv[0] if argv else "unknown",
         )
     elif sys.platform == "win32":
