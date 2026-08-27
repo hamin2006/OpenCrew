@@ -96,14 +96,22 @@ rollback, one-command `delete-stack` teardown. AMI resolves from the public
 failed bootstrap folds the on-box setup-log tail into the signal reason so the
 cause survives the rollback.
 
-`kirocrew cloud launch --agentcore-posture workload|login` (and the Settings
-Remote Crew selector) assigns the box an Amazon Bedrock AgentCore identity in
-the same stack: CloudFormation creates a standalone
-`AWS::BedrockAgentCore::WorkloadIdentity`, the instance role receives the
-posture grant, and systemd gets `KIROCREW_AGENTCORE_WORKLOAD_NAME`. Default
-`none` is the historical launch. Destroying the stack deletes the identity.
-The launcher Policy.json grows only the control-plane create/delete/tag
-verbs — never `InvokeGateway`.
+`kirocrew cloud launch --agentcore-posture workload|login` can create the
+Amazon Bedrock AgentCore identity in the same stack: CloudFormation creates
+a standalone `AWS::BedrockAgentCore::WorkloadIdentity`, the instance role
+receives the posture grant, and systemd gets
+`KIROCREW_AGENTCORE_WORKLOAD_NAME`. Default `none` is the historical
+launch. Destroying the stack deletes the identity. The launcher Policy.json
+grows only the control-plane create/delete/tag verbs — never
+`InvokeGateway`.
+
+See-and-configure for that identity is **not** on Settings → Remote Crew.
+Each crew's own gateway owns it: **Settings → Security → Agent identity**
+(`GET`/`PUT /api/agentcore/identity` on that dashboard). A hub launching
+another box is a different crew. Dashboard launch stays `none`; the
+operator opens the new crew's Settings after it is up, or passes
+`--agentcore-posture` on the CLI when the stack should create the AWS
+resource at deploy time.
 
 The instance bootstrap runs `install.sh --voice` on both its initial attempt and
 retry. This installs the existing `voice` extra (`boto3` and

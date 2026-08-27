@@ -42,6 +42,8 @@ vi.mock('../../api/client', () => ({
     // crash on an undefined queryFn; the section's behaviour is covered in
     // SecurityPanel.tailnet.test.tsx.
     tailnetStatus: vi.fn(),
+    getAgentcoreIdentity: vi.fn(),
+    saveAgentcoreIdentity: vi.fn(),
     listTrustedApps: vi.fn(),
     trustApp: vi.fn(),
     untrustApp: vi.fn(),
@@ -116,6 +118,28 @@ const TAILNET_OFF = {
   resolved_at: 0,
   state: 'off',
 } as const
+
+/** Default this-crew identity: unset and writable.
+ *
+ * The rail now reads GET /api/agentcore/identity on every mount. A bare
+ * `vi.fn()` returns undefined, which react-query rejects. `unset` is the
+ * right default here — this file covers the rest of the panel, and the
+ * section's own states are covered in the agent-identity describe.
+ */
+const IDENTITY_UNSET = {
+  configured: false,
+  posture: null,
+  workload_name: '',
+  source: 'unset' as const,
+  writable: true,
+  write_blocked: null,
+  restart_required: false,
+}
+
+beforeEach(() => {
+  ;(api.getAgentcoreIdentity as ReturnType<typeof vi.fn>).mockResolvedValue(IDENTITY_UNSET)
+  ;(api.saveAgentcoreIdentity as ReturnType<typeof vi.fn>).mockResolvedValue(IDENTITY_UNSET)
+})
 
 function snapshot(overrides: Partial<DeniedCommandsData> = {}): DeniedCommandsData {
   return {
@@ -1815,5 +1839,73 @@ describe('SecurityPanel — review-round regressions', () => {
     // The listbox keeps exactly one accessible name — naming the wrapper too
     // made a screen reader announce it twice.
     expect(screen.getAllByRole('listbox', { name: 'Security sections' })).toHaveLength(1)
+  })
+})
+
+describe('SecurityPanel — agent identity', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ;(api.deniedCommands as ReturnType<typeof vi.fn>).mockResolvedValue(snapshot())
+    ;(api.governancePolicy as ReturnType<typeof vi.fn>).mockResolvedValue(govNoPolicy())
+    ;(api.securityPosture as ReturnType<typeof vi.fn>).mockResolvedValue(posture())
+    ;(api.kirocrewConfig as ReturnType<typeof vi.fn>).mockResolvedValue({})
+    ;(api.tailnetStatus as ReturnType<typeof vi.fn>).mockResolvedValue(TAILNET_OFF)
+    ;(api.getAgentcoreIdentity as ReturnType<typeof vi.fn>).mockResolvedValue(IDENTITY_UNSET)
+  })
+
+  it('saves a workload posture for this crew', async () => {
+    ;(api.saveAgentcoreIdentity as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...IDENTITY_UNSET,
+      configured: true,
+      posture: 'workload',
+      source: 'policy',
+      restart_required: true,
+    })
+    renderWithProviders(<SecurityPanel />, { route: '/?section=identity' })
+
+    const select = await screen.findByLabelText(i18nT('pages.settings.securityPanel.agent_identity_posture'))
+    fireEvent.change(select, { target: { value: 'workload' } })
+    fireEvent.click(screen.getByRole('button', { name: i18nT('pages.settings.securityPanel.agent_identity_save') }))
+
+    await waitFor(() =>
+      expect(api.saveAgentcoreIdentity).toHaveBeenCalledWith({ posture: 'workload' }),
+    )
+    expect(
+      await screen.findByText(i18nT('pages.settings.securityPanel.agent_identity_restart')),
+    ).toBeInTheDocument()
+  })
+
+  it('disables save when this crew\'s policy is not writable', async () => {
+    ;(api.getAgentcoreIdentity as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...IDENTITY_UNSET,
+      writable: false,
+      write_blocked: 'fleet_override',
+    })
+    renderWithProviders(<SecurityPanel />, { route: '/?section=identity' })
+
+    expect(
+      await screen.findByText(i18nT('pages.settings.securityPanel.agent_identity_not_writable')),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText(i18nT('pages.settings.securityPanel.agent_identity_posture'))).toBeDisabled()
+    expect(
+      screen.getByRole('button', { name: i18nT('pages.settings.securityPanel.agent_identity_save') }),
+    ).toBeDisabled()
+  })
+
+  it('summarises the authored posture on the rail', async () => {
+    ;(api.getAgentcoreIdentity as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...IDENTITY_UNSET,
+      configured: true,
+      posture: 'login',
+      workload_name: 'kirocrew-alpha',
+      source: 'policy',
+    })
+    renderWithProviders(<SecurityPanel />, { route: '/?section=identity' })
+
+    const row = await screen.findByRole('option', {
+      name: new RegExp(i18nT('pages.settings.securityPanel.agent_identity'), 'i'),
+    })
+    expect(row).toHaveTextContent(i18nT('pages.settings.securityPanel.agent_identity_posture_login'))
+    expect(await screen.findByText('kirocrew-alpha')).toBeInTheDocument()
   })
 })

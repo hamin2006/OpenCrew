@@ -335,6 +335,17 @@ export interface ComputerUseConfigData {
   sessions_reset?: number
 }
 
+/** This crew's AgentCore identity as returned by GET /api/agentcore/identity. */
+export interface AgentcoreIdentityData {
+  configured: boolean
+  posture: 'workload' | 'login' | null
+  workload_name: string
+  source: 'policy' | 'env' | 'unset'
+  writable: boolean
+  write_blocked?: string | null
+  restart_required: boolean
+}
+
 /** Writable computer-use fields sent to PUT /api/computer-use/config. */
 export interface ComputerUseConfigSave {
   enabled: boolean
@@ -3274,6 +3285,10 @@ export const api = {
   startBrowserView: () => post('/api/browser/view/start', {}).then(j) as Promise<BrowserViewData>,
   // Computer use (desktop automation). The PUT returns the refreshed snapshot so
   // the panel re-renders from server truth rather than its optimistic guess.
+  getAgentcoreIdentity: () =>
+    get('/api/agentcore/identity').then(j) as Promise<AgentcoreIdentityData>,
+  saveAgentcoreIdentity: (body: { posture: 'none' | 'workload' | 'login' }) =>
+    put('/api/agentcore/identity', body).then(j) as Promise<AgentcoreIdentityData>,
   getComputerUseConfig: () => get('/api/computer-use/config').then(j) as Promise<ComputerUseConfigData>,
   saveComputerUseConfig: (body: Partial<ComputerUseConfigSave>) =>
     put('/api/computer-use/config', body).then(j) as Promise<ComputerUseConfigData>,

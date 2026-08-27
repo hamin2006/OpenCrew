@@ -655,7 +655,6 @@ export function RemoteCrewPanel() {
   const [sizeKey, setSizeKey] = useState<SizeTier['key']>('balanced')
   const [copied, setCopied] = useState<'command' | 'policy' | 'launcher-policy' | 'instance-policy' | null>(null)
   const [instancePosture, setInstancePosture] = useState<'workload' | 'login'>('workload')
-  const [launchPosture, setLaunchPosture] = useState<'none' | 'workload' | 'login'>('none')
   const [activeLaunchId, setActiveLaunchId] = useState<string | null>(null)
   const [confirmDeleteTag, setConfirmDeleteTag] = useState<string | null>(null)
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null)
@@ -897,7 +896,7 @@ export function RemoteCrewPanel() {
   })
   const launchMutation = useMutation({
     mutationFn: () => api.cloudLaunch({
-      profile, region, size_key: sizeKey, agentcore_posture: launchPosture,
+      profile, region, size_key: sizeKey,
     }),
     onMutate: () => setActionErr(null),
     onSuccess: job => { setActiveLaunchId(job.id); reloadLaunches() },
@@ -1379,26 +1378,6 @@ export function RemoteCrewPanel() {
                   </div>
                 </>
               )}
-            </div>
-
-            <div className="mt-4">
-              <label className="flex flex-col gap-1.5">
-                <span className="text-[13px] text-muted">{i18nT('pages.settings.remoteCrewPanel.launch_identity')}</span>
-                <select
-                  aria-label={i18nT('pages.settings.remoteCrewPanel.launch_identity')}
-                  className="bg-bg-elevated border border-border rounded-md px-2 py-1.5 text-text text-sm outline-none focus-ring"
-                  value={launchPosture}
-                  onChange={e => {
-                    const v = e.target.value
-                    setLaunchPosture(v === 'workload' || v === 'login' ? v : 'none')
-                  }}
-                >
-                  <option value="none">{i18nT('pages.settings.remoteCrewPanel.posture_none')}</option>
-                  <option value="workload">{i18nT('pages.settings.remoteCrewPanel.posture_workload')}</option>
-                  <option value="login">{i18nT('pages.settings.remoteCrewPanel.posture_login')}</option>
-                </select>
-              </label>
-              <p className="mt-1.5 text-[12px] text-muted">{i18nT('pages.settings.remoteCrewPanel.launch_identity_hint')}</p>
             </div>
 
             <div className="mt-4 flex items-start gap-2 rounded-md border border-border bg-bg-elevated px-3 py-2.5">

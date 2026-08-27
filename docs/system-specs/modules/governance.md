@@ -1276,6 +1276,17 @@ host with no policy is unchanged. Later work consults this row at rebuild /
 Gateway injection; naming it here is what lets a policy pin the capability
 before those chokepoints land.
 
+See-and-configure for a missing row is **this crew's** Settings → Security →
+Agent identity (`GET`/`PUT /api/agentcore/identity`), dashboard-cookie only.
+PUT merges `capabilities.agentcore` into the standalone home
+`security_policy.json` (`_policy_home_path()`). It does not write a fleet
+`KIROCREW_SECURITY_POLICY` override or a signed document (409
+`policy_not_writable`). App tokens are 403 `dashboard_user_required` — the
+same owner-only trust model as computer-use Settings. The ceiling is
+boot-frozen, so a write that changes posture returns `restart_required`.
+This is not a Remote Crew / launch control: a hub launching another box is
+a different crew.
+
 `capabilities.publish` is a `CapabilityGate` (opt-in: `capability_default=False`)
 with an inner `destinations` `ScopedRuleset` (`identifier` matcher) bounding
 which publish-provider ids are allowed once the capability is on — the direct

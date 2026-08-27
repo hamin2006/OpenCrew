@@ -548,31 +548,9 @@ describe('RemoteCrewPanel', () => {
     await waitFor(() => expect(launch).not.toBeDisabled())
     await u.click(launch)
     await waitFor(() => expect(api.cloudLaunch).toHaveBeenCalledWith({
-      profile: '', region: 'us-east-1', size_key: 'balanced', agentcore_posture: 'none',
+      profile: '', region: 'us-east-1', size_key: 'balanced',
     }))
     // Progress card polls the job and renders its steps.
     expect(await screen.findByText('Installing Kiro Crew')).toBeInTheDocument()
-  })
-
-  it('sends workload posture when the AgentCore identity selector is changed', async () => {
-    vi.mocked(api.listInstances).mockResolvedValue({ active: true, warm_set_cap: 5, instances: [] })
-    vi.mocked(api.cloudLaunches).mockResolvedValue({ jobs: [] })
-    vi.mocked(api.cloudPreflight).mockResolvedValue(PREFLIGHT_OK)
-    vi.mocked(api.cloudLaunch).mockResolvedValue(RUNNING_JOB)
-    vi.mocked(api.cloudLaunchStatus).mockResolvedValue(RUNNING_JOB)
-    const u = userEvent.setup()
-    renderWithProviders(<RemoteCrewPanel />)
-
-    await u.click(await screen.findByRole('button', { name: /Set up a new one/i }))
-    await u.selectOptions(
-      await screen.findByRole('combobox', { name: /AgentCore identity/i }),
-      'workload',
-    )
-    const launch = await screen.findByRole('button', { name: /^Launch$/ })
-    await waitFor(() => expect(launch).not.toBeDisabled())
-    await u.click(launch)
-    await waitFor(() => expect(api.cloudLaunch).toHaveBeenCalledWith({
-      profile: '', region: 'us-east-1', size_key: 'balanced', agentcore_posture: 'workload',
-    }))
   })
 })

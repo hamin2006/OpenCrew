@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ShieldCheck, ShieldAlert, Lock, Eye, EyeOff, FileWarning, Terminal, Globe, Fingerprint, KeyRound, ScanLine, Layers, AlertTriangle, CheckCircle2, Circle, Clock, ExternalLink, ChevronRight, ChevronDown, Plus, Trash2, Gavel, Building2, Gauge, ToggleRight, MessageSquare, ListChecks, Boxes, BookOpen, Network, Copy, Check, Package } from 'lucide-react'
+import { ShieldCheck, ShieldAlert, Lock, Eye, EyeOff, FileWarning, Terminal, Globe, Fingerprint, KeyRound, ScanLine, Layers, AlertTriangle, CheckCircle2, Circle, Clock, ExternalLink, ChevronRight, ChevronDown, Plus, Trash2, Gavel, Building2, Gauge, ToggleRight, MessageSquare, ListChecks, Boxes, BookOpen, Network, Copy, Check, Package, IdCard } from 'lucide-react'
 import { useAppSelector } from '../../store'
 import { SettingsSubNav } from '../../components/SettingsSubNav'
 import { useImeGuard } from '../../hooks/useImeGuard'
@@ -8,7 +8,7 @@ import { Badge, Btn, Input, Toggle, Checkbox } from '../../components/ui'
 import { SettingsSection, SettingsCard, SettingsToggle } from '../../components/settings'
 import Modal from '../../components/Modal'
 import InfoTip from '../../components/InfoTip'
-import { api, ApiError, type DeniedCommandsData, type DeniedCommandRule, type DeniedUserRule, type GovernancePolicyData, type GovernanceScope, type GovernanceScopeDetail, type SecurityPostureData, type TailnetStatusData, type TrustedAppsData } from '../../api/client'
+import { api, ApiError, type DeniedCommandsData, type DeniedCommandRule, type DeniedUserRule, type GovernancePolicyData, type GovernanceScope, type GovernanceScopeDetail, type SecurityPostureData, type TailnetStatusData, type TrustedAppsData, type AgentcoreIdentityData } from '../../api/client'
 import { PostureDisclosureRow, CODE_BASE as POSTURE_CODE_BASE } from './PostureDisclosure'
 import { MobileLoginCard } from './MobileLoginCard'
 
@@ -451,6 +451,7 @@ function AddDenyInput({ value, onChange, note, onNoteChange, onAdd, busy, submit
  * all ten locales. It is now reachable only by a scope a future release adds.
  */
 export const SCOPE_LABEL_KEY: Record<string, string> = {
+  'capabilities.agentcore': 'pages.settings.securityPanel.gov_scope_agentcore',
   tools: 'pages.settings.securityPanel.gov_scope_tools',
   mcp: 'pages.settings.securityPanel.gov_scope_mcp',
   apps: 'pages.settings.securityPanel.gov_scope_apps',
@@ -1989,6 +1990,97 @@ function LayersSection() {
   )
 }
 
+/* ── This-crew AgentCore identity ── */
+const IDENTITY_POSTURE_KEY: Record<string, string> = {
+  none: 'pages.settings.securityPanel.agent_identity_posture_none',
+  workload: 'pages.settings.securityPanel.agent_identity_posture_workload',
+  login: 'pages.settings.securityPanel.agent_identity_posture_login',
+}
+
+function AgentIdentitySection() {
+  const queryClient = useQueryClient()
+  const { data, isLoading, isError, error } = useQuery<AgentcoreIdentityData>({
+    queryKey: ['agentcore-identity'],
+    queryFn: api.getAgentcoreIdentity,
+  })
+  const [draft, setDraft] = useState<'none' | 'workload' | 'login'>('none')
+  useEffect(() => {
+    setDraft(data?.posture === 'login' || data?.posture === 'workload' ? data.posture : 'none')
+  }, [data?.posture])
+  const save = useMutation({
+    mutationFn: () => api.saveAgentcoreIdentity({ posture: draft }),
+    onSuccess: next => {
+      queryClient.setQueryData(['agentcore-identity'], next)
+    },
+  })
+  const dirty = (data?.posture ?? 'none') !== draft
+  const blocked = Boolean(data && !data.writable)
+  return (
+    <SettingsSection title={i18nT('pages.settings.securityPanel.agent_identity')}>
+      <SettingsCard>
+        <div data-setting-label={i18nT('pages.settings.securityPanel.agent_identity')}>
+          <p className="text-[12px] text-muted leading-relaxed">
+            {i18nT('pages.settings.securityPanel.agent_identity_hint')}
+          </p>
+          {isLoading ? (
+            <div className="text-[12px] text-muted py-2">{i18nT('pages.settings.securityPanel.loading_governance_policy')}</div>
+          ) : isError ? (
+            <ErrorNotice message={error instanceof Error ? error.message : String(error)} className="mt-3" />
+          ) : (
+            <div className="mt-3 space-y-3">
+              {data?.workload_name ? (
+                <div className="text-[13px] text-text">
+                  <span className="text-muted">{i18nT('pages.settings.securityPanel.agent_identity_name')} </span>
+                  <code className="font-mono text-[12px]">{data.workload_name}</code>
+                </div>
+              ) : (
+                <div className="text-[13px] text-muted">{i18nT('pages.settings.securityPanel.agent_identity_unset')}</div>
+              )}
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[13px] text-muted">{i18nT('pages.settings.securityPanel.agent_identity_posture')}</span>
+                <select
+                  aria-label={i18nT('pages.settings.securityPanel.agent_identity_posture')}
+                  className="bg-bg-elevated border border-border rounded-md px-2 py-1.5 text-text text-sm outline-none focus-ring"
+                  value={draft}
+                  disabled={blocked || save.isPending}
+                  onChange={e => {
+                    const v = e.target.value
+                    setDraft(v === 'workload' || v === 'login' ? v : 'none')
+                  }}
+                >
+                  <option value="none">{i18nT(IDENTITY_POSTURE_KEY.none)}</option>
+                  <option value="workload">{i18nT(IDENTITY_POSTURE_KEY.workload)}</option>
+                  <option value="login">{i18nT(IDENTITY_POSTURE_KEY.login)}</option>
+                </select>
+              </label>
+              {blocked && (
+                <p className="text-[12px] text-muted">{i18nT('pages.settings.securityPanel.agent_identity_not_writable')}</p>
+              )}
+              {save.isError && (
+                <ErrorNotice message={save.error instanceof Error ? save.error.message : String(save.error)} />
+              )}
+              {data?.restart_required && (
+                <p className="text-[12px] text-warn">{i18nT('pages.settings.securityPanel.agent_identity_restart')}</p>
+              )}
+              <div>
+                <Btn
+                  primary
+                  disabled={blocked || !dirty || save.isPending}
+                  onClick={() => save.mutate()}
+                >
+                  {save.isPending
+                    ? i18nT('pages.settings.securityPanel.agent_identity_saving')
+                    : i18nT('pages.settings.securityPanel.agent_identity_save')}
+                </Btn>
+              </div>
+            </div>
+          )}
+        </div>
+      </SettingsCard>
+    </SettingsSection>
+  )
+}
+
 /* ── Documentation section ── */
 function DocsSection() {
   return (
@@ -2019,7 +2111,7 @@ function DocsSection() {
  * The rail states which is which before any row is read, and the two large
  * tables (137 rules, ~20 governed scopes) get a pane instead of a fold.
  */
-type SecuritySectionKey = 'posture' | 'approval' | 'rules' | 'tailnet' | 'apps' | 'layers' | 'governance' | 'docs'
+type SecuritySectionKey = 'posture' | 'identity' | 'approval' | 'rules' | 'tailnet' | 'apps' | 'layers' | 'governance' | 'docs'
 type SecuritySectionGroup = 'status' | 'yours' | 'enforced' | 'reference'
 
 interface SecuritySectionDef {
@@ -2041,6 +2133,7 @@ interface SecuritySectionDef {
  */
 export const SECTION_LABEL_KEY: Record<SecuritySectionKey, string> = {
   posture: 'pages.settings.securityPanel.live_security_posture',
+  identity: 'pages.settings.securityPanel.agent_identity',
   approval: 'pages.settings.securityPanel.yolo_auto_approve',
   rules: 'pages.settings.securityPanel.denied_commands',
   tailnet: 'pages.settings.securityPanel.tailnet_section',
@@ -2062,6 +2155,7 @@ export const SECTION_GROUP_KEY: Record<SecuritySectionGroup, string> = {
  *  sharing a group must stay adjacent. */
 const SECURITY_SECTIONS: readonly SecuritySectionDef[] = [
   { key: 'posture', icon: <ShieldCheck size={15} />, group: 'status' },
+  { key: 'identity', icon: <IdCard className="lucide-inline" />, group: 'yours' },
   { key: 'approval', icon: <Gauge size={15} />, group: 'yours' },
   { key: 'rules', icon: <Terminal size={15} />, group: 'yours' },
   { key: 'tailnet', icon: <Network size={15} />, group: 'yours' },
@@ -2130,6 +2224,10 @@ export function SecurityPanel({ basePath }: { basePath?: string } = {}) {
     queryFn: api.tailnetStatus,
     staleTime: 300_000,
   })
+  const { data: identity, isError: identityError } = useQuery<AgentcoreIdentityData>({
+    queryKey: ['agentcore-identity'],
+    queryFn: api.getAgentcoreIdentity,
+  })
 
   const summaryFor = (key: SecuritySectionKey): string | undefined => {
     switch (key) {
@@ -2167,6 +2265,15 @@ export function SecurityPanel({ basePath }: { basePath?: string } = {}) {
         return cfg.agent?.apps_allow_third_party === true
           ? i18nT('pages.settings.securityPanel.state_allowed')
           : i18nT('pages.settings.securityPanel.state_blocked')
+      case 'identity':
+        if (identityError || identity === undefined) return undefined
+        return identity.configured
+          ? i18nT(
+              identity.posture === 'login'
+                ? IDENTITY_POSTURE_KEY.login
+                : IDENTITY_POSTURE_KEY.workload,
+            )
+          : i18nT(IDENTITY_POSTURE_KEY.none)
       case 'layers':
         return String(FEATURES.length)
       default:
@@ -2217,6 +2324,7 @@ export function SecurityPanel({ basePath }: { basePath?: string } = {}) {
         return (
           <>
             {key === 'posture' && <PostureSection />}
+            {key === 'identity' && <AgentIdentitySection />}
             {key === 'approval' && (
               <SettingsSection title={i18nT('pages.settings.securityPanel.yolo_auto_approve')}>
                 <YoloDurationCard />
