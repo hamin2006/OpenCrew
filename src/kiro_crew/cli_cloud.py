@@ -222,7 +222,9 @@ def _cloud_logout(args: argparse.Namespace) -> int:
         ui.detail("The session may still be active — retry, or check with: kirocrew cloud connect")
         return 1
     ui.ok("Signed out on the instance.")
-    ui.detail("Any in-flight chats/cron sessions were stopped (their kiro-cli runtimes were killed).")
+    ui.detail(
+        "Any in-flight chats/cron sessions were stopped (their kiro-cli runtimes were killed)."
+    )
     ui.detail("Sign in with another account: kirocrew cloud login")
     return 0
 
@@ -324,7 +326,14 @@ def _cloud_destroy(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cloud_iam_policy(_args: argparse.Namespace) -> int:
+def _cloud_iam_policy(args: argparse.Namespace) -> int:
+    if getattr(args, "instance", False):
+        posture = getattr(args, "posture", None) or "workload"
+        if posture not in ("workload", "login"):
+            ui.fail("instance posture must be workload or login")
+            return 1
+        print(iam.agentcore_instance_policy_json(posture))
+        return 0
     print(iam.policy_json())
     return 0
 

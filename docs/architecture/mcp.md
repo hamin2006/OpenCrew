@@ -74,6 +74,9 @@ kirocrew`). Onto that base:
    Kiro Crew's `command`/`args`/`env` win while user-set fields such as
    `autoApprove` survive.
 
+Steps 2–4 (and leftover non-managed merge-base servers) are skipped when
+AgentCore login withhold is on — see the `spec_gate` section below.
+
 Kiro global outranks any seam-contributed provider global because Kiro Crew is
 kiro-cli-only. Managed servers are skipped by every merge loop: their
 `command`/`args` are set by `_refresh_dynamic_fields()` and must not be
@@ -140,6 +143,17 @@ that is already resident (~109 MB, per chat process, including every `spawn_run`
 subagent). While the gate is closed the server appears in neither `mcpServers`
 nor `tools`, so nothing is spawned at all. Both loops that write specs honour it,
 and asymmetrically on purpose:
+
+**Login-mode AgentCore withhold is the same emit-time `spec_gate`.** When
+`capabilities.agentcore` is on and the ceiling posture is `login`,
+`rebuild_agent_config()` withholds `~/.kiro/settings/mcp.json`,
+seam-contributed provider globals, `~/.kiro/crew/mcp.json`, and leftover
+non-managed merge-base entries. Managed `kirocrew-core` / `kirocrew-cron` /
+`kirocrew-computer` (when that server's own `spec_gate` is open) still emit.
+A Gateway URL-only spec is **not** invented here; if an IAM `InvokeGateway`
+probe succeeds under `login`, rebuild records SEL `agentcore.posture_mismatch`
+and still omits any Gateway server. Workload posture keeps the ordinary merge
+of Kiro defaults.
 
 - `build_agent_config()` withholds the entry **and pops one arriving from the
   user override file** — a platform gate exists because there is no driver on

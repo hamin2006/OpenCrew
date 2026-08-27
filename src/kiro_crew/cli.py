@@ -1854,6 +1854,17 @@ Examples:
         "iam-policy", help="Print the least-privilege IAM policy to apply"
     )
     _cloud_creds_opts(_c_iam)
+    _c_iam.add_argument(
+        "--instance",
+        action="store_true",
+        help="Print the instance-role fragment (not the launcher policy)",
+    )
+    _c_iam.add_argument(
+        "--posture",
+        choices=("workload", "login"),
+        default="workload",
+        help="Instance posture when --instance is set (default: workload)",
+    )
     _c_boundary = cloud_sub.add_parser(
         "iam-boundary",
         help="Pre-create the immutable instance permissions boundary (admin, one-time)",

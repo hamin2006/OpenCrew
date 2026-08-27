@@ -922,6 +922,54 @@ def _note_agent_identity_if_enabled() -> None:
     logger.debug("agent_identity enabled; status keys=%s", sorted(status))
 
 
+def _login_mcp_withhold() -> bool:
+    """Emit-time gate: withhold non-managed MCP when AgentCore posture is login.
+
+    Same shape as ``kirocrew-computer``'s ``spec_gate``: consulted at rebuild
+    emission, not by mutating source files. True only when the identity
+    capability is on AND the ceiling posture is ``login``.
+    """
+    if not _agent_identity_enabled():
+        return False
+    return bool(
+        safe_context_call(
+            lambda: agentcore_posture(current_context().governance) == "login",
+            fallback=False,
+            log_message="agentcore posture lookup failed; not withholding MCP",
+        )
+    )
+
+
+def _strip_leftover_non_managed_mcp(config: dict[str, Any], managed_names: set[str]) -> None:
+    """Drop leftover merge-base servers that are not managed ``kirocrew-*``."""
+    servers = config.get("mcpServers")
+    if not isinstance(servers, dict):
+        return
+    for name in [n for n in list(servers) if n not in managed_names]:
+        servers.pop(name, None)
+
+
+def _record_login_invoke_probe() -> None:
+    """Refuse a Gateway emit when login posture can still IAM-invoke Gateway.
+
+    The public core never injects a Gateway spec (that is a later task). A
+    successful probe under ``login`` is still a posture mismatch and is
+    recorded to SEL so the later inject path can fail closed on the same
+    signal. The probe is mockable; this never calls AWS.
+    """
+    from kiro_crew.cloud import iam as cloud_iam
+
+    if not cloud_iam.probe_instance_invoke_gateway():
+        return
+    sel().log_api_access(
+        caller="system",
+        operation="agentcore.posture_mismatch",
+        outcome="denied",
+        source="install_agent",
+        resources="InvokeGateway succeeded under login posture; Gateway spec withheld",
+    )
+
+
 def _extra_mcp_scope_globals() -> list[Path]:
     """Provider-global MCP config files contributed by the edition (CPP seam).
 
@@ -3462,6 +3510,14 @@ def rebuild_agent_config(*, clean: bool = False) -> Path:
     # the Claude Code provider can be re-enabled later without rework; it must
     # not shadow a Kiro-global entry.
     managed_names = set(_MANAGED_MCP_SERVERS)
+    login_withhold = _login_mcp_withhold()
+    if login_withhold:
+        # Login posture is an emit-time spec_gate (same as kirocrew-computer):
+        # withhold Kiro-global, seam-global, crew-store, and leftover
+        # non-managed merge-base entries. Managed kirocrew-* still emit.
+        # A Gateway URL-only spec is not invented here.
+        _strip_leftover_non_managed_mcp(config, managed_names)
+        _record_login_invoke_probe()
 
     # App-contributed MCP servers go in FIRST so an app's namespaced entry
     # outranks any same-named leftover in the shared global file (every loop
@@ -3488,55 +3544,58 @@ def rebuild_agent_config(*, clean: bool = False) -> Path:
             # @ref if it ever lands there.
             config.setdefault("tools", []).append(f"@{_app_srv}")
 
-    shared_mcp = _load_json(_KIRO_MCP_JSON).get("mcpServers", {})
-    for name, spec in shared_mcp.items():
-        if isinstance(spec, dict) and name not in managed_names:
-            # Copy so config never aliases the source dict — a later update()
-            # (kirocrew merge) must not mutate shared_mcp, which is reused as a
-            # fallback candidate during command validation below. The copy also
-            # drops our authorship marker: it records who wrote the entry in a
-            # SHARED file and has no meaning in a spec we render ourselves, so
-            # keeping it would put a key in front of the runtime that says nothing
-            # to it.
-            config.setdefault("mcpServers", {}).setdefault(name, without_marker(spec))
-
-    # Merge shared MCP servers from edition-contributed provider globals (CPP
-    # seam) — now LOWER priority than Kiro global; setdefault is a no-op when
-    # Kiro already populated the same key, so these only fill gaps. In OSS the
-    # seam is empty, so NO provider global (e.g. ~/.claude.json) is merged —
-    # keeping rebuild symmetric with discovery + apply/uninstall so a server the
-    # dashboard can't see is never re-merged into sessions. A companion
-    # contributes its Claude Code scope here and manages it end-to-end.
-    # ``extra_shared_mcp`` accumulates the raw per-scope entries (first scope
-    # wins) for the fallback-candidate lookup and shared-server tools sync below
-    # (replaces the old single ``cc_shared_mcp``).
+    shared_mcp: dict[str, Any] = {}
     extra_shared_mcp: dict[str, dict] = {}
-    for scope_global in _extra_mcp_scope_globals():
-        scope_shared_mcp = _load_json(scope_global).get("mcpServers", {})
-        for name, spec in scope_shared_mcp.items():
-            if not isinstance(spec, dict):
-                continue
-            extra_shared_mcp.setdefault(name, spec)
-            if name not in managed_names:
-                # Copy (see note above) so the source dict stays pristine for
-                # the fallback-candidate lookup.
+    kirocrew_mcp: dict[str, Any] = {}
+    if not login_withhold:
+        shared_mcp = _load_json(_KIRO_MCP_JSON).get("mcpServers", {})
+        for name, spec in shared_mcp.items():
+            if isinstance(spec, dict) and name not in managed_names:
+                # Copy so config never aliases the source dict — a later update()
+                # (kirocrew merge) must not mutate shared_mcp, which is reused as a
+                # fallback candidate during command validation below. The copy also
+                # drops our authorship marker: it records who wrote the entry in a
+                # SHARED file and has no meaning in a spec we render ourselves, so
+                # keeping it would put a key in front of the runtime that says nothing
+                # to it.
                 config.setdefault("mcpServers", {}).setdefault(name, without_marker(spec))
 
-    # ~/.kiro/crew/mcp.json overrides kiro mcp.json for the kirocrew agent —
-    # kirocrew-specific config wins in a tie.
-    # Uses update() to merge into existing specs, preserving user-set fields
-    # like autoApprove while letting kirocrew's command/args/env win.
-    # Skip managed servers for the same reason as above.
-    kirocrew_mcp = _load_json(_user_dir() / "mcp.json").get("mcpServers", {})
-    for name, spec in kirocrew_mcp.items():
-        if isinstance(spec, dict) and name not in managed_names:
-            mcps = config.setdefault("mcpServers", {})
-            if name in mcps and isinstance(mcps[name], dict):
-                # mcps[name] is a private copy (globals were copied in above),
-                # so update() does not mutate any source dict.
-                mcps[name].update(spec)
-            else:
-                mcps[name] = dict(spec)
+        # Merge shared MCP servers from edition-contributed provider globals (CPP
+        # seam) — now LOWER priority than Kiro global; setdefault is a no-op when
+        # Kiro already populated the same key, so these only fill gaps. In OSS the
+        # seam is empty, so NO provider global (e.g. ~/.claude.json) is merged —
+        # keeping rebuild symmetric with discovery + apply/uninstall so a server the
+        # dashboard can't see is never re-merged into sessions. A companion
+        # contributes its Claude Code scope here and manages it end-to-end.
+        # ``extra_shared_mcp`` accumulates the raw per-scope entries (first scope
+        # wins) for the fallback-candidate lookup and shared-server tools sync below
+        # (replaces the old single ``cc_shared_mcp``).
+        for scope_global in _extra_mcp_scope_globals():
+            scope_shared_mcp = _load_json(scope_global).get("mcpServers", {})
+            for name, spec in scope_shared_mcp.items():
+                if not isinstance(spec, dict):
+                    continue
+                extra_shared_mcp.setdefault(name, spec)
+                if name not in managed_names:
+                    # Copy (see note above) so the source dict stays pristine for
+                    # the fallback-candidate lookup.
+                    config.setdefault("mcpServers", {}).setdefault(name, without_marker(spec))
+
+        # ~/.kiro/crew/mcp.json overrides kiro mcp.json for the kirocrew agent —
+        # kirocrew-specific config wins in a tie.
+        # Uses update() to merge into existing specs, preserving user-set fields
+        # like autoApprove while letting kirocrew's command/args/env win.
+        # Skip managed servers for the same reason as above.
+        kirocrew_mcp = _load_json(_user_dir() / "mcp.json").get("mcpServers", {})
+        for name, spec in kirocrew_mcp.items():
+            if isinstance(spec, dict) and name not in managed_names:
+                mcps = config.setdefault("mcpServers", {})
+                if name in mcps and isinstance(mcps[name], dict):
+                    # mcps[name] is a private copy (globals were copied in above),
+                    # so update() does not mutate any source dict.
+                    mcps[name].update(spec)
+                else:
+                    mcps[name] = dict(spec)
 
     # Resolve MCP commands to absolute paths and validate.
     #

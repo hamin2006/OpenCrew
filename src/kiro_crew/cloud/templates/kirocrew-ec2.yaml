@@ -53,19 +53,20 @@ Parameters:
     Description: Discovery tag value written as kirocrew:instance.
   PermissionsBoundaryArn:
     Type: String
-    # The launcher fills this with the deterministic ARN of the SHARED, PRE-CREATED
+    # The launcher fills this with the deterministic ARN of a SHARED, PRE-CREATED
     # immutable instance permissions boundary (arn:aws:iam::<account>:policy/
-    # kirocrew-ec2-boundary). It is created ONCE by launcher code
+    # kirocrew-ec2-boundary, or the AgentCore successor
+    # kirocrew-ec2-boundary-agentcore). It is created ONCE by launcher code
     # (source.ensure_instance_boundary), NOT per-launch here, so a leaked launcher
     # credential can't author a permissive boundary (see cloud/iam.py). The
-    # AllowedPattern mirrors the other ARN params: an IAM policy ARN naming exactly
-    # the boundary. InstanceRole references this by ARN — the CEILING on what the
-    # role can EVER do, regardless of inline/attached policies.
-    AllowedPattern: "^arn:aws:iam::[0-9]{12}:policy/kirocrew-ec2-boundary$"
+    # AllowedPattern lists both names. InstanceRole references this by ARN — the
+    # CEILING on what the role can EVER do, regardless of inline/attached policies.
+    AllowedPattern: "^arn:aws:iam::[0-9]{12}:policy/kirocrew-ec2-boundary(-agentcore)?$"
     Description: >-
       ARN of the pre-created shared instance permissions boundary
-      (arn:aws:iam::<account>:policy/kirocrew-ec2-boundary). The launcher creates
-      it once and passes it here; the InstanceRole is capped by it.
+      (arn:aws:iam::<account>:policy/kirocrew-ec2-boundary or
+      kirocrew-ec2-boundary-agentcore). The launcher creates it once and
+      passes it here; the InstanceRole is capped by it.
   # NB: the AllowedPatterns below mirror the launcher CLI's FieldSpec charsets
   # (cloud/ec2.py). These values flow into the root user-data script, so the
   # template itself must reject shell metacharacters even when someone deploys
@@ -141,8 +142,9 @@ Resources:
   #     with zero inbound ports). Role name is prefixed so the launcher IAM
   #     policy can scope PassRole to it.
   #
-  #     PermissionsBoundary references the SHARED, PRE-CREATED, IMMUTABLE boundary
-  #     (kirocrew-ec2-boundary) by ARN via the PermissionsBoundaryArn parameter —
+  #     PermissionsBoundary references a SHARED, PRE-CREATED, IMMUTABLE boundary
+  #     (kirocrew-ec2-boundary or kirocrew-ec2-boundary-agentcore) by ARN via the
+  #     PermissionsBoundaryArn parameter —
   #     it is NOT created per-launch here anymore. That boundary is the CEILING on
   #     what the role can EVER do, regardless of inline/attached policies: even if
   #     a holder of the launcher policy inlined an admin policy onto this role and

@@ -653,7 +653,8 @@ export function RemoteCrewPanel() {
   const [checkedRegion, setCheckedRegion] = useState(() => readPersistedString(CLOUD_REGION_KEY, DEFAULT_REGION))
   const [showMoreSizes, setShowMoreSizes] = useState(false)
   const [sizeKey, setSizeKey] = useState<SizeTier['key']>('balanced')
-  const [copied, setCopied] = useState<'command' | 'policy' | null>(null)
+  const [copied, setCopied] = useState<'command' | 'policy' | 'launcher-policy' | 'instance-policy' | null>(null)
+  const [instancePosture, setInstancePosture] = useState<'workload' | 'login'>('workload')
   const [activeLaunchId, setActiveLaunchId] = useState<string | null>(null)
   const [confirmDeleteTag, setConfirmDeleteTag] = useState<string | null>(null)
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null)
@@ -942,6 +943,30 @@ export function RemoteCrewPanel() {
       setActionErr(errMsg(e, i18nT('pages.settings.instancesPanel.unknown_error')))
     }
   }, [errMsg])
+  const copyLauncherPolicy = useCallback(async () => {
+    try {
+      const { policy } = await api.cloudIamPolicy()
+      void copyToClipboard(policy)
+      setCopied('launcher-policy')
+      setTimeout(() => setCopied(null), 1500)
+    } catch (e) {
+      setActionErr(errMsg(e, i18nT('pages.settings.instancesPanel.unknown_error')))
+    }
+  }, [errMsg])
+  const copyInstancePolicy = useCallback(async () => {
+    try {
+      const body = await api.cloudIamPolicy({ instance: true, posture: instancePosture })
+      if (!body.instance_policy) {
+        setActionErr(i18nT('pages.settings.instancesPanel.unknown_error'))
+        return
+      }
+      void copyToClipboard(body.instance_policy)
+      setCopied('instance-policy')
+      setTimeout(() => setCopied(null), 1500)
+    } catch (e) {
+      setActionErr(errMsg(e, i18nT('pages.settings.instancesPanel.unknown_error')))
+    }
+  }, [errMsg, instancePosture])
 
   const preflight: CloudPreflight | undefined = preflightQuery.data
   const blockingOk = !!preflight
@@ -1250,6 +1275,7 @@ export function RemoteCrewPanel() {
                 <RefreshCw className="lucide-inline animate-spin" /> {i18nT('pages.settings.remoteCrewPanel.checking')}
               </div>
             ) : preflight ? (
+              <>
               <ul className="m-0 p-0 list-none">
                 <PrereqRow
                   ok={preflight.reachable && !!preflight.account}
@@ -1278,6 +1304,37 @@ export function RemoteCrewPanel() {
                   rechecking={preflightQuery.isFetching}
                 />
               </ul>
+              <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
+                <p className="text-[12px] text-muted">{i18nT('pages.settings.remoteCrewPanel.launcher_policy_hint')}</p>
+                <Btn onClick={copyLauncherPolicy}>
+                  {copied === 'launcher-policy' ? <Check className="lucide-inline" /> : <Copy className="lucide-inline" />}
+                  {copied === 'launcher-policy'
+                    ? i18nT('pages.settings.remoteCrewPanel.copied')
+                    : i18nT('pages.settings.remoteCrewPanel.copy_launcher_policy_json')}
+                </Btn>
+                <p className="text-[12px] text-muted">{i18nT('pages.settings.remoteCrewPanel.instance_policy_hint')}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-2 text-[12px] text-muted">
+                    {i18nT('pages.settings.remoteCrewPanel.instance_posture')}
+                    <select
+                      aria-label={i18nT('pages.settings.remoteCrewPanel.instance_posture')}
+                      className="bg-bg-elevated border border-border rounded-md px-2 py-1 text-text text-sm outline-none focus-ring"
+                      value={instancePosture}
+                      onChange={e => setInstancePosture(e.target.value === 'login' ? 'login' : 'workload')}
+                    >
+                      <option value="workload">{i18nT('pages.settings.remoteCrewPanel.posture_workload')}</option>
+                      <option value="login">{i18nT('pages.settings.remoteCrewPanel.posture_login')}</option>
+                    </select>
+                  </label>
+                  <Btn onClick={copyInstancePolicy}>
+                    {copied === 'instance-policy' ? <Check className="lucide-inline" /> : <Copy className="lucide-inline" />}
+                    {copied === 'instance-policy'
+                      ? i18nT('pages.settings.remoteCrewPanel.copied')
+                      : i18nT('pages.settings.remoteCrewPanel.copy_instance_policy_json')}
+                  </Btn>
+                </div>
+              </div>
+              </>
             ) : (
               <div className="text-[13px] text-muted py-1">
                 {preflightQuery.error ? errMsg(preflightQuery.error, i18nT('pages.settings.remoteCrewPanel.credentials_bad')) : i18nT('pages.settings.remoteCrewPanel.credentials_bad')}

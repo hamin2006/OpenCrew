@@ -2102,7 +2102,19 @@ export const api = {
     const s = p.toString()
     return get('/api/cloud/preflight' + (s ? '?' + s : '')).then(j) as Promise<CloudPreflight>
   },
-  cloudIamPolicy: () => get('/api/cloud/iam-policy').then(j) as Promise<{ policy: string }>,
+  cloudIamPolicy: (opts?: { instance?: boolean; posture?: 'workload' | 'login' }) => {
+    const p = new URLSearchParams()
+    if (opts?.instance) {
+      p.set('instance', '1')
+      if (opts.posture) p.set('posture', opts.posture)
+    }
+    const s = p.toString()
+    return get('/api/cloud/iam-policy' + (s ? '?' + s : '')).then(j) as Promise<{
+      policy: string
+      instance_policy?: string
+      instance_posture?: string
+    }>
+  },
   cloudLaunches: () => get('/api/cloud/launch').then(j) as Promise<{ jobs: LaunchJob[] }>,
   cloudLaunch: (body: { profile: string; region: string; size_key: string }) =>
     post('/api/cloud/launch', body).then(j) as Promise<LaunchJob>,
