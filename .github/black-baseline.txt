@@ -278,7 +278,6 @@ src/kiro_crew/deploy/webapp_types.py
 src/kiro_crew/diagnostics.py
 src/kiro_crew/discord/attachments.py
 src/kiro_crew/doc_parser.py
-src/kiro_crew/embeddings.py
 src/kiro_crew/emoji_list.py
 src/kiro_crew/env.py
 src/kiro_crew/eval/bench/adapters/longmemeval.py

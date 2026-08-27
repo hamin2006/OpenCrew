@@ -4691,6 +4691,10 @@ class TestChdirVerbSpellings:
         "$HOME",
         "%USERPROFILE%",
         "%HOMEDRIVE%%HOMEPATH%",
+        # cmd.exe delayed expansion (`cmd /V:ON`) names the same home as the `%…%`
+        # spelling, and was the one anchor no branch recognised.
+        "!USERPROFILE!",
+        "!HOMEDRIVE!!HOMEPATH!",
         "$env:USERPROFILE",
         "${env:USERPROFILE}",
         "$env:HOMEDRIVE$env:HOMEPATH",
@@ -4721,10 +4725,11 @@ class TestChdirVerbSpellings:
     def test_home_anchor_as_a_chdir_target(self, anchor: str) -> None:
         """Every home anchor the absolute pass accepts also anchors a `cd`.
 
-        ``$env:USERPROFILE`` is why this cannot lean on the unresolved-variable
-        hypothesis: that reads it as the variable ``$env`` plus a literal
-        ``:USERPROFILE`` tail, so the hypothesis it forms is a ``~:USERPROFILE``
-        non-path that `expanduser` leaves alone and nothing matches.
+        These need their own rewriter rather than leaning on the
+        unresolved-variable hypothesis, because that machinery answers a different
+        question: it asks whether an UNRESOLVABLE value could name a home, whereas
+        each of these anchors names one outright. A `cd` target has to be resolved,
+        not hypothesised, for the relative read after it to be tracked at all.
         """
         assert security.is_sensitive_bash_command(f"cd {anchor}; type .aws/credentials")
         assert security.is_sensitive_bash_command(f"Set-Location {anchor}; Get-Content .ssh/id_rsa")
@@ -5623,6 +5628,138 @@ class TestNativeHomeEntryThenFencedRead:
             assert security.is_sensitive_bash_command(
                 "cd " + anchor + " " + self.AMP + " type .aws/credentials"
             ), anchor
+
+
+class TestKeystoneVariableLeafNativeSpellings:
+    """A variable LEAF under the keystone, spelled the way Windows spells paths.
+
+    ``~/.kiro/crew`` is not fenced as a directory -- only its leaves are -- so a
+    read whose filename is a variable (``cat "$HOME/.kiro/crew/$F"``) can only be
+    caught by asking whether the DIRECTORY holds a protected leaf. That rule
+    existed and worked, but it cut the directory off the token by splitting on
+    ``/`` alone: with the separators Windows actually uses, the cut landed on
+    ``/Users`` and the keystone's own directory was never the thing tested.
+
+    Every spelling here reads ``token_signing.key``, ``.local_secret``,
+    ``sel_hmac.key`` and ``security_policy.json`` -- the files AGENTS.md says the
+    agent can neither read nor write, and the reason the ceiling is not
+    self-disableable. Parametrised over the anchors and both separators rather
+    than spot-checked, because the bug was one missing separator in one branch and
+    the forward-slash spelling of the same attack was already covered.
+    """
+
+    ANCHORS = (
+        "$HOME",
+        "%USERPROFILE%",
+        "!USERPROFILE!",
+        "$env:USERPROFILE",
+        "${env:USERPROFILE}",
+    )
+    CREW_HOMES = (".kiro/crew", ".kirocrew")
+
+    @pytest.mark.parametrize("anchor", ANCHORS)
+    @pytest.mark.parametrize("crew", CREW_HOMES)
+    @pytest.mark.parametrize("sep", ("/", "\\"))
+    @pytest.mark.parametrize("leaf", ("$F", "%F%", "!F!", "${F}"))
+    def test_variable_leaf_under_the_keystone_is_refused(
+        self, anchor: str, crew: str, sep: str, leaf: str
+    ) -> None:
+        path = f"{anchor}{sep}{crew.replace('/', sep)}{sep}{leaf}"
+        for verb in ("cat", "type", "Get-Content"):
+            assert security.is_sensitive_bash_command(f"{verb} {path}"), path
+            assert security.is_sensitive_bash_command(f'{verb} "{path}"'), path
+
+    def test_an_absolute_home_spelled_with_backslashes_is_refused(self) -> None:
+        """The shape that made this a real bypass rather than a theoretical one.
+
+        `normalize_shell_command` expands ``$HOME`` before the rule runs, so the
+        token the rule actually sees is an absolute POSIX home followed by
+        backslash separators. Splitting on ``/`` cut that at ``/Users`` -- a
+        directory holding no protected leaf -- so the read was allowed.
+        """
+        home = os.path.expanduser("~")
+        assert security.is_sensitive_bash_command(f"type {home}\\.kiro\\crew\\$F")
+        assert security.is_sensitive_bash_command(f"type {home}\\.kirocrew\\$F")
+
+    def test_a_windows_drive_home_with_a_variable_leaf_is_refused(self) -> None:
+        assert security.is_sensitive_bash_command("type C:\\Users\\me\\.kiro\\crew\\%F%")
+
+    @pytest.mark.parametrize(
+        "command",
+        (
+            'D=$HOME; cat "$D\\.kiro\\crew\\$F"',
+            'D=$HOME; cat "$D/.kiro/crew/$F"',
+            'export D=$HOME; type "$D\\.kirocrew\\$F"',
+            'D=$HOME/.kiro; cat "$D\\crew\\$F"',
+        ),
+    )
+    def test_a_home_held_in_a_tracked_variable_is_refused(self, command: str) -> None:
+        """The shape the raw-text pass cannot see, so only the token rule can catch it.
+
+        Every native-spelling branch in `_build_sensitive_regex` needs a literal
+        home ANCHOR in the command text. Assigning the home to a variable first
+        removes it: the raw text carries ``$D``, which no anchor alternation
+        matches. What resolves the path is the segment walk substituting the value
+        the command assigned itself -- and the token the walk then hands over is an
+        absolute home followed by whichever separator was typed, which is precisely
+        why the directory cut has to honour both.
+        """
+        assert security.is_sensitive_bash_command(command), command
+
+    @pytest.mark.parametrize(
+        "command",
+        (
+            'cat "$UNKNOWN/.kiro/crew/$F"',
+            'cat "$UNKNOWN\\.kiro\\crew\\$F"',
+            'cat "$(get_home)/.kiro/crew/$F"',
+            'cat "${SOMEDIR}/.kirocrew/$F"',
+        ),
+    )
+    def test_an_unrecognised_anchor_with_a_variable_leaf_is_refused(self, command: str) -> None:
+        """Both ends unresolvable: nothing in the text names the home OR the leaf.
+
+        The anchor is a variable the command never assigned (or a substitution whose
+        value needs the command to run), so there is no literal prefix to take a
+        directory from and no anchor for any raw-text branch to match. What closes
+        it is testing the home HYPOTHESIS as a directory: if the unresolved anchor
+        were a home, the path would name the keystone's own directory, so the leaf
+        variable could name a protected file and the read is refused.
+        """
+        assert security.is_sensitive_bash_command(command), command
+
+    def test_nested_keystone_directories_are_covered_too(self) -> None:
+        """The rule is derived from the fenced list, not from a hand-written path."""
+        assert security.is_sensitive_bash_command(
+            "type %USERPROFILE%\\.kiro\\crew\\apps\\aws-control\\%F%"
+        )
+
+    @pytest.mark.parametrize(
+        "command",
+        (
+            'cat "$HOME/logs/$F"',
+            "cat $BUILD/out.txt",
+            "ls ~/Documents/$F",
+            "cat ~/project/src/$MODULE.py",
+            'grep -r "$PATTERN" ~/code/',
+            # A backslash is a legal POSIX filename character, so folding
+            # separators must not turn an odd filename into a keystone read.
+            'cat "$HOME/weird\\name/$F"',
+            # Reachable subdirectories of the crew home stay reachable: only the
+            # directories whose sensitivity lives in their leaves are fenced.
+            "cat ~/.kiro/crew/skills/$NAME/SKILL.md",
+            "cat ~/.kiro/crew/workspace/$PROJ/notes.md",
+            # The anchors must not fire on a lookalike or a bare echo.
+            "echo %USERPROFILE%\\Desktop\\%FILE%",
+            "echo !MYVAR!",
+            "cd %USERPROFILE%\\src",
+            # A general-purpose directory whose variable-leaf spelling is ordinary.
+            "type %APPDATA%\\%MYAPP%\\config.ini",
+            "type %LOCALAPPDATA%\\%VENDOR%\\cache",
+        ),
+    )
+    def test_benign_variable_leaves_are_still_allowed(self, command: str) -> None:
+        """Fencing on the parent directory must not fence every variable leaf."""
+        assert security.is_sensitive_bash_command(command) is None, command
 
 
 class TestWindowsPathShapes:

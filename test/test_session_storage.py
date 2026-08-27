@@ -886,9 +886,17 @@ class TestTrashBatchNamesAreLogSafe:
             def is_dir() -> bool:
                 return True
 
-        manifests: dict[str, tuple[dict[str, object], list[dict[str, object]]] | None] = {
+        # Patched at `_summarize_manifest`, which is what `list_trash` calls, and
+        # shaped as its `(header, sessions, staged_bytes)` return. It used to patch
+        # `_read_manifest` and return that function's `(header, entries)` pair; the
+        # streaming rewrite moved the listing onto `_summarize_manifest` and left this
+        # patch intercepting nothing, so the real code ran against `_ForgedDir` and
+        # raised `TypeError` on `batch / MANIFEST_NAME`. The double deliberately does
+        # NOT grow a `__truediv__`: the point of this test is that neither log site
+        # touches the filesystem, so the seam has to be the manifest read itself.
+        manifests: dict[str, tuple[dict[str, object], int, int] | None] = {
             "missing": None,
-            "disagreeing": ({"batch_id": "someone-else", "created_at": _NOW}, []),
+            "disagreeing": ({"batch_id": "someone-else", "created_at": _NOW}, 0, 0),
         }
         for label, parsed in manifests.items():
             caplog.clear()
@@ -897,7 +905,7 @@ class TestTrashBatchNamesAreLogSafe:
                 session_storage.platform_compat, "is_link_or_junction", lambda p: False
             )
             monkeypatch.setattr(
-                session_storage, "_read_manifest", lambda batch, parsed=parsed: parsed
+                session_storage, "_summarize_manifest", lambda batch, parsed=parsed: parsed
             )
 
             with caplog.at_level(logging.DEBUG, logger="kiro_crew.session_storage"):
