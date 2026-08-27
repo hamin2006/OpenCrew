@@ -416,7 +416,15 @@ delegates to that same global. Wired sites:
   `CredentialPolicy` Protocol; no `CONTRACT_VERSION` bump; `DefaultCredentialPolicy`
   returns `frozenset()` so standalone redaction is byte-identical.
 - `agent.py` — `current_context().mcp_tooling.extra_mcp_servers()` merged
-  additively (`setdefault`) into the agent config build + dynamic refresh.
+  additively (`setdefault`) into the agent config build + dynamic refresh
+  after secret-key strip. `agent_identity.gateway_mcp_spec()` contributes
+  a URL-only Gateway server on workload posture via
+  `platform.agentcore_gateway.rebuild_gateway_contribution`. Login posture
+  withholds that spec at rebuild; `bind_session_principal` calls
+  `attach_gateway_inbound`, which vends through
+  `vend_gateway_inbound_token` onto a `0600` session sidecar.
+  `acp/client.py` appends `session_gateway_servers(session_key)` onto the
+  existing `session/new` `mcpServers` list. Default adapter stays empty.
 - `slack/events.py` / `slack/handler.py` / `dashboard/handlers_system.py` —
   Slack enterprise gate + SSO status route through `slack_gate` / `identity`.
 - `mcp_gateway/manager.py` — `GatewayManager._spawn_once` resolves

@@ -857,6 +857,36 @@ def _extra_mcp_servers() -> dict[str, dict]:
     return dict(extra) if extra else {}
 
 
+def _merge_edition_mcp(mcp: dict[str, Any]) -> None:
+    """Merge edition extras + the AgentCore Gateway rebuild contribution.
+
+    Extras are ADD-only (setdefault) after secret keys are stripped so a
+    companion ``Authorization`` header cannot land in kirocrew.json. The
+    Gateway server itself is ours: workload posture assigns a URL-only spec;
+    any other posture retracts a leftover entry. Login withhold also drops
+    other remote (``url``) extras — those attach per-session, not at rebuild.
+    """
+    from kiro_crew.platform.agentcore_gateway import (
+        GATEWAY_SERVER_NAME,
+        rebuild_gateway_contribution,
+        strip_secret_spec_keys,
+    )
+
+    login_withhold = _login_mcp_withhold()
+    for name, spec in _extra_mcp_servers().items():
+        if name == GATEWAY_SERVER_NAME or not isinstance(spec, dict):
+            continue
+        cleaned = strip_secret_spec_keys(spec)
+        if login_withhold and cleaned.get("url"):
+            continue
+        mcp.setdefault(name, cleaned)
+    contribution = rebuild_gateway_contribution()
+    if GATEWAY_SERVER_NAME in contribution:
+        mcp[GATEWAY_SERVER_NAME] = contribution[GATEWAY_SERVER_NAME]
+    else:
+        mcp.pop(GATEWAY_SERVER_NAME, None)
+
+
 def _agentcore_capability_permitted() -> bool:
     """Whether the governance ceiling permits ``capabilities.agentcore``.
 
@@ -919,7 +949,7 @@ def _agent_identity_enabled() -> bool:
 def _note_agent_identity_if_enabled() -> None:
     """Live consumption of ``ctx.agent_identity``; no-op when the Default is off.
 
-    Later Gateway/token work keys on this three-conjunct probe. Reading
+    Gateway rebuild + inbound attach key on this three-conjunct probe. Reading
     ``status()`` here is display-only and uses an empty-dict fallback so a
     raised adapter cannot degrade to "enabled".
     """
@@ -965,10 +995,10 @@ def _strip_leftover_non_managed_mcp(config: dict[str, Any], managed_names: set[s
 def _record_login_invoke_probe() -> None:
     """Refuse a Gateway emit when login posture can still IAM-invoke Gateway.
 
-    The public core never injects a Gateway spec (that is a later task). A
-    successful probe under ``login`` is still a posture mismatch and is
-    recorded to SEL so the later inject path can fail closed on the same
-    signal. The probe is mockable; this never calls AWS.
+    Rebuild does not emit a Gateway spec under ``login`` (inbound attach
+    does that per session). A successful probe is still a posture mismatch
+    and is recorded to SEL so attach fails closed on the same signal. The
+    probe is mockable; this never calls AWS.
     """
     from kiro_crew.cloud import iam as cloud_iam
 
@@ -2186,12 +2216,10 @@ def build_agent_config(*, gated_off: "frozenset[str] | None" = None) -> dict:
             entry["autoApprove"] = list(spec["autoApprove"])
         mcp[name] = entry
 
-    # Edition-contributed MCP servers (PlatformContext).  ADD-only: standalone
-    # contributes {} (unchanged), the Amazon companion adds the internal MCP server etc.
-    # Entries are already kiro-spec-shaped, so we only extend the map — no spec
-    # restructuring, deny_unknown_fields invariant preserved.
-    for name, spec in _extra_mcp_servers().items():
-        mcp.setdefault(name, dict(spec))
+    # Edition-contributed MCP servers (PlatformContext) + AgentCore Gateway.
+    # Extras are ADD-only after secret-key strip; Gateway is URL-only and
+    # retracts when identity is off or posture is not workload.
+    _merge_edition_mcp(mcp)
 
     # Default-model tracking ("managed" vs frozen) is recorded in the
     # agent_state sidecar by the install path (rebuild_agent_config), never as
@@ -2306,12 +2334,10 @@ def _refresh_dynamic_fields(config: dict, *, gated_off: "frozenset[str] | None" 
         if "autoApprove" in spec and is_new:
             entry["autoApprove"] = list(spec["autoApprove"])
 
-    # Edition-contributed MCP servers (PlatformContext).  ADD-only: only seed a
-    # server the user doesn't already have, so user customizations on a refresh
-    # are preserved.  Standalone contributes {} (unchanged); Amazon adds
-    # the internal MCP server etc.  Already kiro-spec-shaped — no restructuring.
-    for name, extra_spec in _extra_mcp_servers().items():
-        mcp.setdefault(name, dict(extra_spec))
+    # Edition-contributed MCP servers (PlatformContext) + AgentCore Gateway.
+    # Same merge as build_agent_config: extras ADD-only after strip; Gateway
+    # assigned or retracted.
+    _merge_edition_mcp(mcp)
 
     # Security: hooks always from bundled config.
     # Hard-fail if bundled defaults are missing — deny-by-default.
@@ -3529,7 +3555,8 @@ def rebuild_agent_config(*, clean: bool = False) -> Path:
         # withhold Kiro-global, seam-global, crew-store, leftover
         # non-managed merge-base entries, and app-contributed servers.
         # Managed kirocrew-* still emit. A Gateway URL-only spec is not
-        # invented here.
+        # invented here under login (workload contribution lands in
+        # ``_merge_edition_mcp``).
         _strip_leftover_non_managed_mcp(config, managed_names)
         _record_login_invoke_probe()
 
@@ -3991,9 +4018,13 @@ def rebuild_agent_config(*, clean: bool = False) -> Path:
         # must also be added to config['tools'], otherwise kiro-cli exposes the
         # server but not its tools. The public edition contributes none, so this
         # is a no-op there.
+        from kiro_crew.platform.agentcore_gateway import GATEWAY_SERVER_NAME
+
         _register_names = list(_MANAGED_MCP_SERVERS) + [
             n for n in _extra_mcp_servers() if n not in _MANAGED_MCP_SERVERS
         ]
+        if GATEWAY_SERVER_NAME in valid_servers and GATEWAY_SERVER_NAME not in _register_names:
+            _register_names.append(GATEWAY_SERVER_NAME)
         for mcp_name in _register_names:
             ref = f"@{mcp_name}"
             if mcp_name in valid_servers and ref not in config.get("tools", []):

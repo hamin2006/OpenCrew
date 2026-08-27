@@ -579,9 +579,10 @@ analogous to `mcp_gateway` declared-env forwarding
    rotation.
 
 A local token-proxy MCP (Crew attaches the header, then forwards) is
-the fallback if kiro-cli cannot take per-session headers without a
-rebuild. Phase 0 of the implementation plan probes this and writes the
-verdict before Phase 3 ships.
+the unused fallback. Phase 0 did not run a live kiro-cli header probe;
+v1 ships the `0600` session sidecar and injects it on `session/new`,
+the same pattern as MCP-gateway env sidecars. Tokens never enter the
+agent file. The header-proxy MCP is not implemented.
 
 ### Token vending path (Gateway, not Crew)
 
@@ -677,6 +678,20 @@ Answer two questions and write the verdict into this RFC:
 2. Does a standalone (non-Gateway-managed) workload identity in the
    target account accept `GetWorkloadAccessTokenForJWT` from the
    companion's IAM principal?
+
+**Verdict (1):** sidecar path. A live kiro-cli per-session header probe
+did not run. Crew already writes `0600` env sidecars for pooled MCP
+and injects servers on `session/new` without touching
+`~/.kiro/agents/`. Inbound JWTs use that same contract: URL-only spec
+at rebuild for `workload`; login vends onto
+`<data home>/agentcore-inbound/<digest>.json` and
+`AcpClient._pooled_mcp_servers` appends the entry. The local
+header-proxy MCP is not implemented.
+
+**Verdict (2):** still companion-owned. Public core never calls
+`GetWorkloadAccessToken*`. CFN creates the standalone
+`AWS::BedrockAgentCore::WorkloadIdentity`; the companion adapter
+vends.
 
 Exit: both answers recorded here. Phase 3 is blocked on (1). Phase 2
 is blocked on (2). If (1) is no, implement the local header-proxy MCP
@@ -837,9 +852,9 @@ with the matching boundary + instance grant).
 
 ## Open questions
 
-1. **kiro-cli per-session headers (Phase 0).** If the rendered agent
-   JSON is the only header channel, v1 ships the local header-proxy
-   MCP. Verdict goes here before Phase 3.
+1. **kiro-cli per-session headers (Phase 0).** Resolved: sidecar path.
+   Tokens never enter the rendered agent JSON. `session/new` injects
+   the inbound sidecar. Header-proxy MCP not implemented.
 2. **One workload vs per-agent-config workloads.** v1 is one
    `kirocrew` workload. A later `kirocrew-<agent_id>` split is
    additive (new identities, same protocol).

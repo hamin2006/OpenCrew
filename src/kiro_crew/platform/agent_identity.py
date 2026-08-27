@@ -20,7 +20,11 @@ from kiro_crew.constants import (
     SUBAGENT_BATCH_COMPLETION_PREFIX,
     SUBAGENT_COMPLETION_PREFIX,
 )
-from kiro_crew.platform.context import async_safe_context_call, current_context
+from kiro_crew.platform.context import (
+    PlatformCompositionError,
+    async_safe_context_call,
+    current_context,
+)
 from kiro_crew.platform.interfaces import SessionPrincipal
 
 logger = logging.getLogger(__name__)
@@ -187,4 +191,16 @@ async def bind_session_principal(
     setter = getattr(sessions, "set_principal", None)
     if callable(setter):
         setter(session_key, annotated)
+    try:
+        from kiro_crew.platform.agentcore_gateway import attach_gateway_inbound
+
+        await attach_gateway_inbound(annotated)
+    except PlatformCompositionError:
+        raise
+    except Exception:
+        logger.debug(
+            "attach_gateway_inbound failed; Gateway stays absent for %s",
+            session_key,
+            exc_info=True,
+        )
     return annotated

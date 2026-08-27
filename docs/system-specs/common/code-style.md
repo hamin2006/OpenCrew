@@ -40,6 +40,7 @@ Paths below are relative to `src/kiro_crew/`.
 | Process-wide shutdown signal | `__init__.py` | `shutdown_event`. Background loops `await shutdown_event.wait()` with a timeout instead of a plain `asyncio.sleep`, so they wake instantly on Ctrl-C. |
 | Base agent config | `config/defaults.json` | `tools`, `allowedTools`, `resources`, `hooks`, model. Packaged as package data, so editing it needs no code change. |
 | Managed MCP server specs | `agent.py` | `_MANAGED_MCP_SERVERS`: which servers are auto-registered and refreshed while preserving user customizations. |
+| AgentCore Gateway MCP name + inbound sidecar dir | `platform/agentcore_gateway.py` | `GATEWAY_SERVER_NAME` (`agentcore-gateway`), `INBOUND_DIR_NAME` (`agentcore-inbound`). |
 | Built-in skills | `builtin_skills/<name>/SKILL.md` | Frontmatter (`always`, `triggers`, `dir`) is the skill's own contract. This is the only tree copied into a user's `~/.kiro/crew/skills/`. |
 
 Other style rules:

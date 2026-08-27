@@ -157,12 +157,19 @@ non-managed merge-base entries, and app-contributed MCP servers. The
 companion identity adapter does not have to be on — a fleet that set
 login posture on the Default still withholds. Managed `kirocrew-core` /
 `kirocrew-cron` / `kirocrew-computer` (when that server's own `spec_gate`
-is open) still emit. A Gateway URL-only spec is **not** invented here; if
-an IAM `InvokeGateway` probe succeeds under `login`, rebuild records SEL
-`agentcore.posture_mismatch` and still omits any Gateway server. Workload
-posture keeps the ordinary merge of Kiro defaults. Gateway/token work
-stays behind the three-conjunct identity probe (adapter AND capability
-AND known posture).
+is open) still emit. A Gateway URL-only spec is **not** invented here
+under `login` — `attach_gateway_inbound` writes a `0600` session sidecar
+after `vend_gateway_inbound_token` returns a live JWT, and `session/new`
+injects that URL + `Authorization` header. `~/.kiro/agents/kirocrew.json`
+never holds the bearer. If an IAM `InvokeGateway` probe succeeds under
+`login`, rebuild records SEL `agentcore.posture_mismatch` and both rebuild
+and attach omit Gateway. Workload posture emits a URL-only Gateway spec
+at rebuild (IAM inbound, no JWT sidecar) and keeps the ordinary merge of
+Kiro defaults. Companion extras that carry `headers` / `Authorization`
+are stripped before the agent file is written. Gateway/token work stays
+behind the three-conjunct identity probe (adapter AND capability AND
+known posture). Gateway is unpooled: each session has its own inbound
+sidecar.
 
 - `build_agent_config()` withholds the entry **and pops one arriving from the
   user override file** — a platform gate exists because there is no driver on
