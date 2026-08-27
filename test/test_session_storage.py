@@ -926,6 +926,122 @@ class TestScanCache:
         assert session_storage.list_units(_index()) == []
 
 
+class TestCotenantCache:
+    """The co-tenant lookup follows the scan cache's rules: reads may reuse, mutations never.
+
+    :func:`_scan_units` is the single funnel for four public entry points, and its
+    co-tenant dependency used to bypass the 30s cache entirely — every read paid a
+    pod-root enumeration plus a map read per leftover pod even on a scan-cache hit.
+    The cache is OPT-IN per call site because the same value gates destructive
+    paths; the safety tests below are what stop a later refactor from making it
+    global.
+    """
+
+    @staticmethod
+    def _count_pod_scans(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+        """Count full passes over the pod root without changing their answer."""
+        calls = {"n": 0}
+        real = session_storage._replay_store_cotenants
+
+        def counted() -> list[str]:
+            calls["n"] += 1
+            return real()
+
+        monkeypatch.setattr(session_storage, "_replay_store_cotenants", counted)
+        return calls
+
+    def test_a_read_inside_the_ttl_does_not_rescan_the_pod_root(
+        self, stores: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A scan-cache hit must not still pay for the co-tenant half."""
+        _, kiro_home = stores
+        monkeypatch.setenv("KIROCREW_POD_ROOT", str(tmp_path / "pods"))
+        _cli_half(kiro_home, "aaaa1111", log_bytes=32, age_days=40)
+        calls = self._count_pod_scans(monkeypatch)
+
+        index = _index()
+        session_storage.list_units(index)
+        session_storage.measure(index, now=_NOW)
+        session_storage.list_units(index)
+
+        assert calls["n"] == 1, "reads within the TTL must enumerate the pod root once"
+
+    def test_select_reclaimable_rereads_cotenants_on_every_call(
+        self, stores: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Reclaim selection derives refusals from this value: never from a snapshot."""
+        _, kiro_home = stores
+        monkeypatch.setenv("KIROCREW_POD_ROOT", str(tmp_path / "pods"))
+        _cli_half(kiro_home, "aaaa1111", log_bytes=32, age_days=40)
+        session_storage.list_units(_index())  # prime both caches
+        calls = self._count_pod_scans(monkeypatch)
+
+        session_storage.select_reclaimable(_index(), 30.0, now=_NOW)
+        session_storage.select_reclaimable(_index(), 30.0, now=_NOW)
+
+        assert calls["n"] == 2, "a mutation-path selection must re-read co-tenants every call"
+
+    def test_move_to_trash_rereads_cotenants_on_every_call(
+        self, stores: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Both the scan inside the move and the pre-move authority check must be live.
+
+        The pre-move re-read exists precisely because the view taken during the
+        scan is seconds stale by the time anything moves; a primed cache must not
+        be allowed to answer it.
+        """
+        _, kiro_home = stores
+        monkeypatch.setenv("KIROCREW_POD_ROOT", str(tmp_path / "pods"))
+        _cli_half(kiro_home, "aaaa1111", log_bytes=64, age_days=40)
+        session_storage.list_units(_index())  # prime both caches
+        calls = self._count_pod_scans(monkeypatch)
+
+        session_storage.move_to_trash(["aaaa1111"], reason="manual", index=_index(), now=_NOW)
+
+        assert calls["n"] == 2, "the move's scan and its authority re-read must each hit disk"
+
+    def test_invalidate_scan_cache_drops_the_cotenant_pass_too(
+        self, stores: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The mutation hooks clear one thing; both caches must go with it."""
+        monkeypatch.setenv("KIROCREW_POD_ROOT", str(tmp_path / "pods"))
+        calls = self._count_pod_scans(monkeypatch)
+
+        session_storage.list_units(_index())
+        session_storage.invalidate_scan_cache()
+        session_storage.list_units(_index())
+
+        assert calls["n"] == 2, "invalidation must force a fresh co-tenant pass"
+
+    def test_a_different_pod_root_is_not_answered_from_an_older_pass(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``KIROCREW_POD_ROOT`` resolves per call, so the root keys the cache.
+
+        Same reasoning as the store locations in the scan key: keyed without the
+        location, the second root would be answered with the first's pass.
+        """
+        first = tmp_path / "pods-a"
+        pod = first / "wt-old"
+        pod.mkdir(parents=True)
+        # Own replay store: its sids are recorded but it constrains nothing.
+        (pod / "kiro").mkdir()
+        (pod / "session_map.json").write_text(
+            json.dumps({"dashboard:chat-1": {"sid": "podsid01"}}), encoding="utf-8"
+        )
+        monkeypatch.setenv("KIROCREW_POD_ROOT", str(first))
+        protected, refusals = session_storage.cotenant_sids(cached=True)
+        assert protected == frozenset({"podsid01"})
+        assert refusals == ()
+
+        second = tmp_path / "pods-b"
+        monkeypatch.setenv("KIROCREW_POD_ROOT", str(second))
+        assert session_storage.cotenant_sids(cached=True) == (
+            frozenset(),
+            (),
+        ), "an empty pod root must read as empty, not as the first root's pass"
+
+
 class TestSharedStoreRefusal:
     """An isolated data home over a shared replay store cannot see who is live."""
 
@@ -1190,7 +1306,9 @@ class TestSharedStoreRefusal:
 
         calls = {"n": 0}
 
-        def claimed_late() -> tuple[frozenset[str], tuple[tuple[str, str], ...]]:
+        def claimed_late(
+            *, cached: bool = False
+        ) -> tuple[frozenset[str], tuple[tuple[str, str], ...]]:
             calls["n"] += 1
             # Empty while the scan runs; owned by the time the move is authorized.
             return (frozenset() if calls["n"] == 1 else frozenset({"adopted001"})), ()
@@ -1210,7 +1328,9 @@ class TestSharedStoreRefusal:
 
         calls = {"n": 0}
 
-        def unreadable_late() -> tuple[frozenset[str], tuple[tuple[str, str], ...]]:
+        def unreadable_late(
+            *, cached: bool = False
+        ) -> tuple[frozenset[str], tuple[tuple[str, str], ...]]:
             calls["n"] += 1
             return frozenset(), (() if calls["n"] == 1 else (("wt-corrupt", "unreadable map"),))
 
@@ -1314,7 +1434,11 @@ class TestSharedStoreRefusal:
         """
         _, kiro_home = stores
         _cli_half(kiro_home, "podsid01", log_bytes=64, age_days=40)
-        monkeypatch.setattr(session_storage, "cotenant_sids", lambda: (frozenset({"podsid01"}), ()))
+        monkeypatch.setattr(
+            session_storage,
+            "cotenant_sids",
+            lambda *, cached=False: (frozenset({"podsid01"}), ()),
+        )
 
         with pytest.raises(SessionStorageError, match="still in use"):
             session_storage.move_to_trash(["podsid01"], reason="manual", index=_index(), now=_NOW)

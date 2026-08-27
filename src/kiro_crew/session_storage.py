@@ -390,10 +390,17 @@ def invalidate_scan_cache() -> None:
     the cache is process-wide and its key covers the store paths and the pairing,
     not the CONTENTS of the stores, so a test that writes more files and re-reads
     inside the TTL would otherwise be answered from its own earlier pass.
+
+    Drops the co-tenant pass too (see :func:`cotenant_sids`). A mutation that
+    invalidates one cache has changed the world the other described, and clearing
+    both here keeps every existing mutation hook correct without each having to
+    know that two caches exist.
     """
-    global _scan_cache
+    global _scan_cache, _cotenant_cache
     with _scan_cache_lock:
         _scan_cache = None
+    with _cotenant_cache_lock:
+        _cotenant_cache = None
 
 
 def _scan_units(index: SessionIndex, *, cached: bool = False) -> list[SessionUnit]:
@@ -405,9 +412,11 @@ def _scan_units(index: SessionIndex, *, cached: bool = False) -> list[SessionUni
     reused (see *cached*) while the answer to "may this be reclaimed" is always
     computed from the index the caller passed in this call.
 
-    *cached* permits a recent filesystem pass to be reused. It is for READ paths
-    only: no refusal is derived from the cached half, but a reclaim must not
-    select against a snapshot at all, so every mutation path leaves it False.
+    *cached* permits a recent filesystem pass to be reused — both halves of it:
+    the store scan (:func:`_scan_raw`) and the co-tenant lookup below thread the
+    same flag. It is for READ paths only: no refusal is derived from the cached
+    half, but a reclaim must not select against a snapshot at all, so every
+    mutation path leaves it False.
     """
     raw = _scan_raw(index.stem_to_sid, cached=cached)
     active_stems = index.active_stems
@@ -417,7 +426,7 @@ def _scan_units(index: SessionIndex, *, cached: bool = False) -> list[SessionUni
     # one place every read and every reclaim passes through — measure, the row
     # list, the pre-classification and move_to_trash all derive `active` from it,
     # so one assignment protects all of them. A caller cannot forget to ask.
-    cotenant, _unreadable = cotenant_sids()
+    cotenant, _unreadable = cotenant_sids(cached=cached)
     units = []
     for entry in raw:
         active = (
@@ -762,7 +771,26 @@ def _replay_store_cotenants() -> list[str]:
     )
 
 
-def cotenant_sids() -> tuple[frozenset[str], tuple[tuple[str, str], ...]]:
+_cotenant_cache_lock = threading.Lock()
+# (expires_at, cache key, (protected sids, refusals))
+_cotenant_cache: (
+    tuple[float, tuple[object, ...], tuple[frozenset[str], tuple[tuple[str, str], ...]]] | None
+) = None
+
+
+def _cotenant_key() -> tuple[object, ...]:
+    """Everything a cached co-tenant pass depends on besides the maps themselves.
+
+    The pod root is part of it, for the same reason the store locations are part
+    of :func:`_scan_key`: it is resolved per call (``KIROCREW_POD_ROOT`` overrides
+    it), so a process can legitimately answer for different roots over its
+    lifetime, and a key without the location would answer a question about one
+    root with a pass taken over another.
+    """
+    return (str(_pod_root()),)
+
+
+def cotenant_sids(*, cached: bool = False) -> tuple[frozenset[str], tuple[tuple[str, str], ...]]:
     """Replay-store sessions a co-tenant instance can still resume.
 
     Returns ``(sids, refusals)``. The sids are protected exactly like this
@@ -797,7 +825,22 @@ def cotenant_sids() -> tuple[frozenset[str], tuple[tuple[str, str], ...]]:
     Liveness is deliberately not the test anywhere here. A stopped instance's map
     still names sessions it would resume if restarted, so ownership — not whether a
     process is running this second — is what protects them.
+
+    *cached* permits a recent pass over the pod maps to be reused, mirroring
+    :func:`_scan_raw`'s flag: opt-in per call site, never global. It exists for
+    the read paths behind :func:`_scan_units`. The refusal derivation in
+    :func:`reclaim_block_reason` and the pre-move re-read in
+    :func:`move_to_trash` must never opt in — a stale answer there could let a
+    reclaim proceed against a store another instance still holds, which is the
+    exact staleness the pre-move re-read exists to close.
     """
+    global _cotenant_cache
+    if cached:
+        with _cotenant_cache_lock:
+            if _cotenant_cache is not None:
+                expires, key, result = _cotenant_cache
+                if time.monotonic() < expires and key == _cotenant_key():
+                    return result
     protected: set[str] = set()
     refusals: list[tuple[str, str]] = []
     root = _pod_root()
@@ -860,7 +903,11 @@ def cotenant_sids() -> tuple[frozenset[str], tuple[tuple[str, str], ...]]:
             refusals.append(
                 (name, "it shares this replay store and can resume sessions at any time")
             )
-    return frozenset(protected), tuple(refusals)
+    result = (frozenset(protected), tuple(refusals))
+    if cached:
+        with _cotenant_cache_lock:
+            _cotenant_cache = (time.monotonic() + _SCAN_CACHE_TTL, _cotenant_key(), result)
+    return result
 
 
 def _has_own_replay_store(pod_home: Path) -> bool:
