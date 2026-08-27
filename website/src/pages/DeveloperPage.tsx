@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { ScrollText, Monitor, Brain, Archive, Database, Network, Activity, FileCode2, TestTubeDiagonal } from 'lucide-react'
+import { ScrollText, Monitor, Brain, Archive, Database, Network, Activity, FileCode2, TestTubeDiagonal, Cpu } from 'lucide-react'
 import SidePanelLayout from '../components/SidePanelLayout'
 import { ContentSkeleton } from '../components/ui'
 import { LogViewer } from './LogsPage'
@@ -10,6 +10,10 @@ import LocalStorageDebug from './LocalStorageDebug'
 import { McpManagement } from './settings/McpManagement'
 import { KiroCrewCfgTab, AgentCfgTab } from './overview'
 import { FeaturePreviewsTab } from './developer/FeaturePreviewsTab'
+import { AcpBackendCard } from './overview/AcpBackendCard'
+import { usePreviewFlag } from '../hooks/usePreviewFlag'
+import { PREVIEW_ACP_BACKENDS } from '../utils/previewFlags'
+import { api } from '../api/client'
 
 /**
  * Lazy: MemoryGraphTab is the only eager owner of the sigma/graphology stack
@@ -29,7 +33,7 @@ import { i18nT } from '../i18n/t'
  * English after a language switch. Called once per render instead, mirroring
  * `buildTabs()` in SettingsPage.tsx, which feeds the same SidePanelLayout.
  */
-function buildTabs() {
+function buildTabs(acpAdapters: boolean) {
   return [
     { key: 'logs', label: i18nT('pages.developerPage.tabs.logs.label'), icon: <ScrollText size={16} />, description: i18nT('pages.developerPage.tabs.logs.description') },
     { key: 'system', label: i18nT('pages.developerPage.tabs.system.label'), icon: <Monitor size={16} />, description: i18nT('pages.developerPage.tabs.system.description') },
@@ -38,13 +42,15 @@ function buildTabs() {
     { key: 'mcp-pool', label: i18nT('pages.developerPage.tabs.mcpPool.label'), icon: <Network size={16} />, description: i18nT('pages.developerPage.tabs.mcpPool.description') },
     { key: 'memory', label: i18nT('pages.developerPage.tabs.memory.label'), icon: <Brain size={16} />, description: i18nT('pages.developerPage.tabs.memory.description') },
     { key: 'config', label: i18nT('pages.developerPage.tabs.config.label'), icon: <FileCode2 size={16} />, description: i18nT('pages.developerPage.tabs.config.description') },
+    ...(acpAdapters ? [{ key: 'acp-adapters', label: i18nT('pages.developer.featurePreviewsTab.acp_backends'), icon: <Cpu size={16} />, description: i18nT('pages.developer.featurePreviewsTab.experimental_acp_backends_claude_code_and_openai') }] : []),
     { key: 'feature-previews', label: i18nT('pages.developerPage.tabs.featurePreviews.label'), icon: <TestTubeDiagonal size={16} />, description: i18nT('pages.developerPage.tabs.featurePreviews.description') },
     { key: 'archive', label: i18nT('pages.developerPage.tabs.archive.label'), icon: <Archive size={16} />, description: i18nT('pages.developerPage.tabs.archive.description') },
   ]
 }
 
 export default function DeveloperPage() {
-  const tabs = buildTabs()
+  const acpAdapters = usePreviewFlag(PREVIEW_ACP_BACKENDS)
+  const tabs = buildTabs(acpAdapters)
   return (
     <SidePanelLayout title={i18nT('pages.developerPage.developer')} tabs={tabs} rememberKey="developer">
       {tab => <>
@@ -69,6 +75,9 @@ export default function DeveloperPage() {
             <KiroCrewCfgTab />
             <AgentCfgTab />
           </>
+        )}
+        {tab === 'acp-adapters' && acpAdapters && (
+          <AcpBackendCard onSave={(path, value) => api.patchConfig(path, value)} />
         )}
         {tab === 'feature-previews' && <FeaturePreviewsTab />}
         {tab === 'archive' && <SessionArchive />}

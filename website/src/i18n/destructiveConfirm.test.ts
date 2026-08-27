@@ -213,6 +213,7 @@ export const QUOTED_OPERAND_CONFIRM_KEYS = [
  */
 export const EXEMPT_CONFIRM_PLACEHOLDER_NAMES = new Set([
   'count',
+  'total',
   'lines',
   'verb',
   'number',
@@ -225,6 +226,8 @@ export const EXEMPT_CONFIRM_PLACEHOLDER_NAMES = new Set([
   'resources',
   'bucket',
   'distribution',
+  'backend',
+  'productName',
 ])
 
 /**

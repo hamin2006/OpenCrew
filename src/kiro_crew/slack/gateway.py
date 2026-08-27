@@ -399,6 +399,14 @@ _CRON_POSTTOKEN_CONTINUE_MSG = _TRANSIENT_CONTINUE_MSG
 
 logger = logging.getLogger(__name__)
 
+
+def _runtime_provider_label(provider: object) -> str:
+    """Concrete harness label for context and usage attribution."""
+    from kiro_crew.providers.acp import provider_label
+
+    return provider_label(provider)
+
+
 # Full chat turn timeout — tool calls, multi-step reasoning, spawning.
 # More generous than INJECTION_TIMEOUT (default 900s, tunable via
 # KIROCREW_INJECTION_TIMEOUT) which only covers a single injected continuation turn.
@@ -4217,6 +4225,7 @@ class GatewayOrchestrator:
                             True,
                             interactive=False,
                             agent=agent,
+                            provider_type=_runtime_provider_label(client),
                         )
                         # Wall clock for the cron agent turn: acp never assigns
                         # TurnUsage.duration_ms, so the row falls back to this.
@@ -4270,9 +4279,7 @@ class GatewayOrchestrator:
                                     else (job.model or "")
                                 ),
                                 _turn_usage,
-                                provider=(
-                                    self._cfg.agent.provider if hasattr(self, "_cfg") else "acp"
-                                ),
+                                provider=_runtime_provider_label(client),
                                 surface="cron",
                                 agent=read_effective_agent(client) or agent or "",
                                 context_used=_used,
@@ -4348,7 +4355,7 @@ class GatewayOrchestrator:
                         "do NOT repeat the same content]\n"
                         + "\n".join(f"- {a}" for a in job.acked_items)
                     )
-                _provider = self._cfg.agent.provider if hasattr(self, "_cfg") else "acp"
+                _provider = _runtime_provider_label(client)
                 # Off-loop: build_message embeds the episodic query.
                 full_message, _ = await run_in_embed_pool(
                     self.ctx_builder.build_message,
@@ -5110,7 +5117,10 @@ class GatewayOrchestrator:
                 injected = _HEARTBEAT_KEEP_INJECTION + task_text
                 # Off-loop: build_message embeds the episodic query.
                 full_message, _ = await run_in_embed_pool(
-                    self.ctx_builder.build_message, injected, is_new
+                    self.ctx_builder.build_message,
+                    injected,
+                    is_new,
+                    provider_type=_runtime_provider_label(client),
                 )
 
                 # A heartbeat turn runs unattended. Bound it with a hard deadline
@@ -5148,7 +5158,7 @@ class GatewayOrchestrator:
                 await _persist_turn_row(
                     client,
                     session_key,
-                    provider=(self._cfg.agent.provider if hasattr(self, "_cfg") else "acp"),
+                    provider=_runtime_provider_label(client),
                     surface="heartbeat",
                     agent_fallback=lambda: "kirocrew-heartbeat",
                     t0=_turn_t0,
@@ -5179,7 +5189,7 @@ class GatewayOrchestrator:
                 await _persist_turn_row(
                     client,
                     session_key,
-                    provider=(self._cfg.agent.provider if hasattr(self, "_cfg") else "acp"),
+                    provider=_runtime_provider_label(client),
                     surface="heartbeat",
                     agent_fallback=lambda: "kirocrew-heartbeat",
                     t0=_turn_t0,
@@ -5295,7 +5305,7 @@ class GatewayOrchestrator:
         try:
             client, is_new, _resumed = await self.sessions.get_or_create(key)
             _acquired = True
-            _provider = self._cfg.agent.provider if hasattr(self, "_cfg") else "acp"
+            _provider = _runtime_provider_label(client)
             full_msg, _ = await run_in_embed_pool(
                 self.ctx_builder.build_message, tagged, is_new, key, provider_type=_provider
             )
@@ -5323,7 +5333,7 @@ class GatewayOrchestrator:
             await _persist_turn_row(
                 client,
                 key,
-                provider=(self._cfg.agent.provider if hasattr(self, "_cfg") else "acp"),
+                provider=_runtime_provider_label(client),
                 surface="monitor",
                 agent_fallback=lambda: _get_agent_for_session(key),
                 t0=_turn_t0,
@@ -5347,7 +5357,7 @@ class GatewayOrchestrator:
             await _persist_turn_row(
                 client,
                 key,
-                provider=(self._cfg.agent.provider if hasattr(self, "_cfg") else "acp"),
+                provider=_runtime_provider_label(client),
                 surface="monitor",
                 agent_fallback=lambda: _get_agent_for_session(key),
                 t0=_turn_t0,
@@ -7167,7 +7177,7 @@ class GatewayOrchestrator:
                         client, is_new, _resumed = await self.sessions.get_or_create(parent_key)
                         _acquired = True
                         _footer_client = client
-                        _provider = self._cfg.agent.provider if hasattr(self, "_cfg") else "acp"
+                        _provider = _runtime_provider_label(client)
                         if self.ctx_builder:
                             msg, _ = await run_in_embed_pool(
                                 self.ctx_builder.build_message,
@@ -7385,7 +7395,7 @@ class GatewayOrchestrator:
                 try:
                     client, is_new, _resumed = await self.sessions.get_or_create(parent_key)
                     acquired = True
-                    _provider = self._cfg.agent.provider if hasattr(self, "_cfg") else "acp"
+                    _provider = _runtime_provider_label(client)
                     if self.ctx_builder:
                         msg, _ = await run_in_embed_pool(
                             self.ctx_builder.build_message,

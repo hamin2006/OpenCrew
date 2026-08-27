@@ -115,9 +115,7 @@ class TestPerSlotWindowIsAlsoBudgetBounded:
         return min(state.approval_timeout_for(slot), td.tool_approval_timeout_secs())
 
     @pytest.mark.asyncio
-    async def test_attended_window_is_the_configured_one_not_the_flat_constant(
-        self, cfg
-    ) -> None:
+    async def test_attended_window_is_the_configured_one_not_the_flat_constant(self, cfg) -> None:
         # 7200 is what `approval_timeout_for` returns for an attended slot; the
         # window that actually applies is the configurable, bounded one.
         cfg(window=600, turn=7200)
@@ -389,23 +387,31 @@ class TestArmTimeBudget:
             seen.append(td._turn_budget_remaining())
             return "done"
 
-        assert await td._bounded_turn(_turn(), 120.0) == "done"
-        # Remaining is computed as (t + 120.0) - t', so float rounding can put it
-        # a hair ABOVE the timeout when both clock reads land on the same tick
-        # (Windows' coarse timer makes that the common case). Assert the budget
-        # is essentially the full window rather than pinning a strict bound.
-        assert seen and seen[0] is not None
-        assert seen[0] == pytest.approx(120.0, abs=1.0)
-        assert td._TURN_DEADLINE.get() is None
+        outer = td._TURN_DEADLINE.set(None)
+        try:
+            assert await td._bounded_turn(_turn(), 120.0) == "done"
+            # Remaining is computed as (t + 120.0) - t', so float rounding can put it
+            # a hair ABOVE the timeout when both clock reads land on the same tick
+            # (Windows' coarse timer makes that the common case). Assert the budget
+            # is essentially the full window rather than pinning a strict bound.
+            assert seen and seen[0] is not None
+            assert seen[0] == pytest.approx(120.0, abs=1.0)
+            assert td._TURN_DEADLINE.get() is None
+        finally:
+            td._TURN_DEADLINE.reset(outer)
 
     @pytest.mark.asyncio
     async def test_deadline_cleared_even_when_the_turn_raises(self) -> None:
         async def _boom() -> None:
             raise ValueError("nope")
 
-        with pytest.raises(ValueError):
-            await td._bounded_turn(_boom(), 120.0)
-        assert td._TURN_DEADLINE.get() is None
+        outer = td._TURN_DEADLINE.set(None)
+        try:
+            with pytest.raises(ValueError):
+                await td._bounded_turn(_boom(), 120.0)
+            assert td._TURN_DEADLINE.get() is None
+        finally:
+            td._TURN_DEADLINE.reset(outer)
 
 
 class TestNoBudgetCard:

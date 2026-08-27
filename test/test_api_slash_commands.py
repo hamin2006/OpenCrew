@@ -22,8 +22,8 @@ from kiro_crew.dashboard.chat_utils import (
 )
 
 
-def _fake_config(provider: str):
-    return SimpleNamespace(agent=SimpleNamespace(provider=provider))
+def _fake_config(backend: str):
+    return SimpleNamespace(agent=SimpleNamespace(provider="acp", acp_backend=backend))
 
 
 def _make_app() -> web.Application:
@@ -55,6 +55,28 @@ def test_description_map_covers_slash_commands():
 
 
 class TestApiSlashCommands:
+    @pytest.mark.asyncio
+    async def test_slot_uses_its_live_provider_after_default_switch(self):
+        from kiro_crew.acp.types import ACP_BACKEND_CLAUDE
+
+        live = SimpleNamespace(
+            backend=ACP_BACKEND_CLAUDE,
+            _slash_commands=["compact", "review"],
+        )
+        sessions = SimpleNamespace(get_provider=lambda key: live)
+        state = SimpleNamespace(sessions=sessions)
+        with patch(
+            "kiro_crew.dashboard.handlers.agents.KiroCrewConfig.load",
+            return_value=_fake_config(""),
+        ):
+            app = _make_app()
+            app["state"] = state
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.get("/api/slash-commands?slot=chat-1")
+                payload = await resp.json()
+
+        assert {item["name"] for item in payload} >= {"/compact", "/review", "/side"}
+
     @pytest.mark.asyncio
     async def test_default_provider_returns_described_commands(self):
         payload = await _get("kiro")
@@ -90,7 +112,7 @@ class TestApiSlashCommands:
         state = SimpleNamespace(sessions=SimpleNamespace(active_providers=lambda: [provider]))
         with patch(
             "kiro_crew.dashboard.handlers.agents.KiroCrewConfig.load",
-            return_value=_fake_config("claude_code"),
+            return_value=_fake_config("claude"),
         ):
             app = _make_app()
             app["state"] = state
