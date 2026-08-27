@@ -203,6 +203,13 @@ function Companion() {
   /** Where the press began, for the tap-vs-drag test in onClick. */
   const clickDownPt = useRef<{ x: number; y: number } | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
+  // Which display draws the companion. The main process elects ONE active overlay
+  // and tells every other it is inactive, so only one ghost is ever shown. Starts
+  // FALSE and waits for set-active(true): openPetWindow always elects exactly one
+  // active display and re-sends the flag after load, so a secondary monitor never
+  // briefly flashes the pet before its set-active(false) arrives (the very
+  // one-ghost-per-screen regression this change removes).
+  const [isActive, setIsActive] = useState(false)
   // Peek/dock state the drag hook drives when the companion is left at a screen edge.
   // Centralised in useEdgeHide so `setIsPeeking` updates `isPeekingRef` SYNCHRONOUSLY
   // — useDrag reads that ref inside its mouse handlers, so a render-lagged ref (the
@@ -222,7 +229,7 @@ function Companion() {
    */
   const { mood, setMood, clearPersistentMood } = useMood()
 
-  const { pos, setPos, onMouseDown, dragging, posReady, isDragging } = useDrag(
+  const { pos, setPos, onMouseDown, dragging, dragPollingStarted, posReady, isDragging } = useDrag(
     {
       x: Math.max(0, window.innerWidth - PET_PX - 28),
       y: Math.max(0, window.innerHeight - PET_PX - 96),
@@ -240,6 +247,46 @@ function Companion() {
     getGrip: () => dragGrip({}),
     },
   )
+
+  // The main process elects the active overlay. On a live drag hand-off onto this
+  // display it also passes the local landing point and that the gesture is still
+  // held, so we adopt the drag in flight instead of the pet popping in at rest.
+  useEffect(() => {
+    return petBridge.onSetActive?.((active, x, y, isDragging) => {
+      setIsActive(active)
+      if (active) {
+        if (isDragging && typeof x === 'number' && typeof y === 'number') {
+          // Adopt the drag main is already polling: mark polling started so this
+          // overlay does not fire a SECOND dragStart, and take the entry point.
+          dragging.current = true
+          dragPollingStarted.current = true
+          setPos({ x, y })
+        }
+      } else {
+        // Handed off to another display: drop our local drag state so useDrag's 2s
+        // stuck-timer (or a stray mouseup) can't fire a late dragEnd or save stale
+        // coordinates for a drag this overlay no longer owns.
+        dragging.current = false
+        dragPollingStarted.current = false
+      }
+    })
+  }, [dragging, dragPollingStarted, setPos])
+
+  // At drag-start the main process broadcasts onDragListenMouseUp; while it holds we
+  // watch for the mouseup and report it back, so a drag that ends over this overlay
+  // is caught even though the gesture began on another display.
+  useEffect(() => {
+    let onUp: (() => void) | null = null
+    const detach = () => {
+      if (onUp) { window.removeEventListener('mouseup', onUp); onUp = null }
+    }
+    const off = petBridge.onDragListenMouseUp?.(() => {
+      detach()
+      onUp = () => { petBridge.dragMouseUp?.(); detach() }
+      window.addEventListener('mouseup', onUp)
+    })
+    return () => { off?.(); detach() }
+  }, [])
 
   /**
    * Playful idle motion — the ported `usePlayfulMotion` hook. ONE rAF loop mutates
@@ -998,7 +1045,7 @@ function Companion() {
   // menu reports its own rect separately (PetContextMenu → petBridge.setMenuHitbox).
   // `placement` is null until the bubble is measured, so the bubble rect is reported
   // once it lands.
-  useMouseForward({ pos, bubbleRect: placement?.rect ?? null, dragging })
+  useMouseForward({ pos, bubbleRect: placement?.rect ?? null, dragging, isActive })
 
   // Playful motion runs only when the companion is settled — not while it is being
   // dragged, walking, or docked at an edge. Set every render so the rAF loop sees
@@ -1033,7 +1080,7 @@ function Companion() {
 
   return (
     <div className="cc-pet-layer">
-      {menuAt ? (
+      {isActive && menuAt ? (
         <div className="cc-menu-host">
           <PetContextMenu
             x={menuAt.x}
@@ -1044,7 +1091,7 @@ function Companion() {
         </div>
       ) : null}
 
-      {bubble ? (
+      {isActive && bubble ? (
         <div
           ref={bubbleHostRef}
           className="cc-bubble-host"
@@ -1072,6 +1119,7 @@ function Companion() {
       ) : null}
 
       {/* The only element that accepts input; everything else is click-through. */}
+      {isActive ? (
       <div
         className="cc-pet"
         onMouseDown={(e) => {
@@ -1191,6 +1239,7 @@ function Companion() {
           />
         </div>
       </div>
+      ) : null}
     </div>
   )
 }
