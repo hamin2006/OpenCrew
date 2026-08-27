@@ -33,9 +33,9 @@ from kiro_crew.cloud import source as source_mod
 from kiro_crew.cloud import ssm
 from kiro_crew.cloud.aws import AWSError, CloudActionDenied
 from kiro_crew.cloud.launch_engine import RealLaunchEngine
+from kiro_crew.dashboard.handlers._shared import _owner_denial_response
 from kiro_crew.dashboard.handlers.source_providers import (
     is_owner_dashboard_request,
-    stale_owner_session_response,
 )
 from kiro_crew.loop_lock import LoopBoundLock
 from kiro_crew.sel import sel
@@ -84,16 +84,11 @@ def _guard(request: web.Request, operation: str) -> Optional[web.Response]:
     # Owner gate: delegated to the shared helper's predicate + stale relabel.
     if not is_owner_dashboard_request(request):
         _audit(operation, "denied", error="non-owner rejected")
-        stale = stale_owner_session_response(request)
-        if stale is not None:
-            return stale
-        return web.json_response(
-            {
-                "error": "cloud provisioning is owner-only (the dashboard owner, "
-                "not an app or an allowed Slack user)",
-                "code": "cloud_owner_only",
-            },
-            status=403,
+        return _owner_denial_response(
+            request,
+            "cloud provisioning is owner-only (the dashboard owner, "
+            "not an app or an allowed Slack user)",
+            "cloud_owner_only",
         )
     if sys.platform.startswith("win"):
         _audit(operation, "denied", error="windows unsupported")

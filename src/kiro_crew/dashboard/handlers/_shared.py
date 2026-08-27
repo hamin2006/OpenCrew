@@ -1833,7 +1833,6 @@ async def require_owner_dashboard_request(
 
     from kiro_crew.dashboard.handlers.source_providers import (
         is_owner_dashboard_request,
-        stale_owner_session_response,
     )
 
     if is_owner_dashboard_request(request):
@@ -1861,11 +1860,34 @@ async def require_owner_dashboard_request(
 
     # Deny decision made above; only the response label changes for a signed
     # pre-owner bootstrap subject (see stale_owner_session_response).
+    return _owner_denial_response(request)
+
+
+def _owner_denial_response(
+    request: web.Request,
+    error_message: str = "owner authorization required",
+    error_code: str = "owner_only",
+) -> web.Response:
+    """Stale-session relabel + 403 denial -- the tail of every owner gate.
+
+    Synchronous: ``stale_owner_session_response`` is a pure predicate over
+    request attributes, so no I/O is involved.  Domain-specific wrappers that
+    perform their own SEL/audit logging before reaching the denial response can
+    call this directly instead of going through the full async
+    ``require_owner_dashboard_request`` helper.
+
+    Imports ``stale_owner_session_response`` inside the function body to avoid
+    a circular import (same reason as the async helper above).
+    """
+    from kiro_crew.dashboard.handlers.source_providers import (
+        stale_owner_session_response,
+    )
+
     stale = stale_owner_session_response(request)
     if stale is not None:
         return stale
     return web.json_response(
-        {"error": "owner authorization required", "code": "owner_only"},
+        {"error": error_message, "code": error_code},
         status=403,
     )
 
