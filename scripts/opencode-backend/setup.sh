@@ -228,23 +228,25 @@ KIROCREW_BIN="$VENV/bin/kirocrew" python3 - "$OPENCODE_JSON" <<'PY'
 import json, os, sys
 path = sys.argv[1]
 cfg = json.load(open(path))
-model = (
-    os.environ.get("OPENCREW_MODEL")
-    or cfg.get("model")
-    or "deepseek/deepseek-v4-flash"
-)
+# kirocrew agents carry NO model pin: they inherit the config's top-level
+# \`model\`, so changing the default updates every agent at once. Any legacy
+# pins (older setups) are dropped here for the same reason.
 agents = {
-    "kirocrew": {"description": "Kiro Crew persistent assistant agent", "mode": "primary", "model": model},
-    "kirocrew-lite": {"description": "Kiro Crew lite assistant agent", "mode": "primary", "model": model},
-    "kirocrew-research": {"description": "Autonomous research worker — runs one research cycle per turn in a Research Lab campaign loop.", "mode": "primary", "model": model},
-    "kirocrew-heartbeat": {"description": "Unattended polling worker — runs one HeartbeatService task per cycle with a read-only toolset.", "mode": "primary", "model": model},
-    "kirocrew-knowledge": {"description": "Dedicated agent for knowledge extraction, categorization, and summarization.", "mode": "primary", "model": model},
+    "kirocrew": {"description": "Kiro Crew persistent assistant agent", "mode": "primary"},
+    "kirocrew-lite": {"description": "Kiro Crew lite assistant agent", "mode": "primary"},
+    "kirocrew-research": {"description": "Autonomous research worker — runs one research cycle per turn in a Research Lab campaign loop.", "mode": "primary"},
+    "kirocrew-heartbeat": {"description": "Unattended polling worker — runs one HeartbeatService task per cycle with a read-only toolset.", "mode": "primary"},
+    "kirocrew-knowledge": {"description": "Dedicated agent for knowledge extraction, categorization, and summarization.", "mode": "primary"},
 }
 mcp = {
     "kirocrew-core": {"type": "local", "command": [os.environ["KIROCREW_BIN"], "mcp-core"]},
     "kirocrew-cron": {"type": "local", "command": [os.environ["KIROCREW_BIN"], "mcp-cron"]},
 }
 cfg.setdefault("agent", {}).update(agents)
+for _name in agents:
+    _a = cfg["agent"].get(_name)
+    if isinstance(_a, dict):
+        _a.pop("model", None)
 cfg.setdefault("mcp", {}).update(mcp)
 json.dump(cfg, open(path, "w"), indent=2, ensure_ascii=False)
 print("+ agents", ", ".join(sorted(agents)))
@@ -255,16 +257,9 @@ ok "opencode.json updated (backup: opencode.json.bak)"
 # ── 8. Agent prompts ───────────────────────────────────────────────────────
 say "Agent prompts ($OPENCODE_AGENT_DIR)"
 mkdir -p "$OPENCODE_AGENT_DIR"
-python3 - "$KIRO_AGENTS_DIR" "$OPENCODE_AGENT_DIR" "$OPENCODE_JSON" <<'PY'
-import json, os, pathlib, sys
-kiro_dir, out_dir, oc_json = map(pathlib.Path, sys.argv[1:])
-model = os.environ.get("OPENCREW_MODEL") or "deepseek/deepseek-v4-flash"
-try:
-    _cfg = json.loads(oc_json.read_text(encoding="utf-8"))
-    if _cfg.get("model"):
-        model = _cfg["model"]
-except Exception:
-    pass
+python3 - "$KIRO_AGENTS_DIR" "$OPENCODE_AGENT_DIR" <<'PY'
+import json, pathlib, sys
+kiro_dir, out_dir = map(pathlib.Path, sys.argv[1:])
 fallbacks = {
     "kirocrew-research": "Autonomous research worker — runs one research cycle per turn.",
     "kirocrew-heartbeat": "Unattended polling worker — runs one HeartbeatService task per cycle.",
@@ -273,6 +268,13 @@ fallbacks = {
 for name, fallback in fallbacks.items():
     out = out_dir / f"{name}.md"
     if out.exists():
+        _txt = out.read_text(encoding="utf-8")
+        if "\nmodel: " in _txt.split("---", 2)[1] if _txt.startswith("---") else False:
+            _stripped = __import__("re").sub(
+                r"(?m)^model: .*$\n?", "", _txt, count=1
+            )
+            out.write_text(_stripped, encoding="utf-8")
+            print(f"+ {out.name} (model line removed)")
         continue
     src = kiro_dir / f"{name}.json"
     if src.exists():
@@ -281,7 +283,7 @@ for name, fallback in fallbacks.items():
         desc = (data.get("description") or fallback).strip().replace('"', "'")
     else:
         prompt, desc = fallback, fallback
-    out.write_text(f"---\ndescription: {desc}\nmode: primary\nmodel: {model}\n---\n\n{prompt}\n")
+    out.write_text(f"---\ndescription: {desc}\nmode: primary\n---\n\n{prompt}\n")
     print(f"+ {out.name} ({len(prompt)} chars)")
 PY
 ok "agent prompts present"

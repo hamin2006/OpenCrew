@@ -196,13 +196,14 @@ if (-not $cfg) {
 } else {
 if (-not $cfg.agent) { $cfg | Add-Member -NotePropertyName agent -NotePropertyValue ([pscustomobject]@{}) }
 if (-not $cfg.mcp)   { $cfg | Add-Member -NotePropertyName mcp -NotePropertyValue ([pscustomobject]@{}) }
-if ($cfg.model) { $model = $cfg.model }
+# kirocrew agents carry NO model pin: they inherit the config's top-level
+# model, so changing the default updates every agent at once.
 $agents = [ordered]@{
-    "kirocrew"            = [pscustomobject]@{ description = "Kiro Crew persistent assistant agent"; mode = "primary"; model = $model }
-    "kirocrew-lite"       = [pscustomobject]@{ description = "Kiro Crew lite assistant agent"; mode = "primary"; model = $model }
-    "kirocrew-research"   = [pscustomobject]@{ description = "Autonomous research worker — runs one research cycle per turn in a Research Lab campaign loop."; mode = "primary"; model = $model }
-    "kirocrew-heartbeat"  = [pscustomobject]@{ description = "Unattended polling worker — runs one HeartbeatService task per cycle with a read-only toolset."; mode = "primary"; model = $model }
-    "kirocrew-knowledge"  = [pscustomobject]@{ description = "Dedicated agent for knowledge extraction, categorization, and summarization."; mode = "primary"; model = $model }
+    "kirocrew"            = [pscustomobject]@{ description = "Kiro Crew persistent assistant agent"; mode = "primary" }
+    "kirocrew-lite"       = [pscustomobject]@{ description = "Kiro Crew lite assistant agent"; mode = "primary" }
+    "kirocrew-research"   = [pscustomobject]@{ description = "Autonomous research worker — runs one research cycle per turn in a Research Lab campaign loop."; mode = "primary" }
+    "kirocrew-heartbeat"  = [pscustomobject]@{ description = "Unattended polling worker — runs one HeartbeatService task per cycle with a read-only toolset."; mode = "primary" }
+    "kirocrew-knowledge"  = [pscustomobject]@{ description = "Dedicated agent for knowledge extraction, categorization, and summarization."; mode = "primary" }
 }
 $kiroBin = Join-Path $Checkout ".venv\Scripts\kirocrew.exe"
 $mcp = [ordered]@{
@@ -212,6 +213,8 @@ $mcp = [ordered]@{
 foreach ($k in $agents.Keys) {
     $exists = $cfg.agent.PSObject.Properties.Name -contains $k
     if (-not $exists) { $cfg.agent | Add-Member -NotePropertyName $k -NotePropertyValue $agents[$k] }
+    $entry = $cfg.agent.PSObject.Properties[$k]
+    if ($entry) { $entry.Value.PSObject.Properties.Remove("model") }
 }
 foreach ($k in $mcp.Keys) {
     $exists = $cfg.mcp.PSObject.Properties.Name -contains $k
@@ -232,7 +235,15 @@ $fallbacks = @{
 $kiroAgentsDir = Join-Path $KiHome "agents"
 foreach ($name in $fallbacks.Keys) {
     $out = Join-Path $OcAgentDir "$name.md"
-    if (Test-Path $out) { continue }
+    if (Test-Path $out) {
+        $mdText = Get-Content $out -Raw
+        if ($mdText -match "(?m)^model: .*$") {
+            $mdText = $mdText -replace "(?m)^model: .*$`n?", ""
+            Set-Utf8NoBom $out $mdText
+            Ok "+ $name.md (model line removed)"
+        }
+        continue
+    }
     $prompt = $fallbacks[$name]
     $desc = $fallbacks[$name]
     $src = Join-Path $kiroAgentsDir "$name.json"
@@ -241,7 +252,7 @@ foreach ($name in $fallbacks.Keys) {
         if ($data.prompt) { $prompt = $data.prompt }
         if ($data.description) { $desc = $data.description }
     }
-    $md = "---`ndescription: $desc`nmode: primary`nmodel: $model`n---`n`n$prompt`n"
+    $md = "---`ndescription: $desc`nmode: primary`n---`n`n$prompt`n"
     Set-Utf8NoBom $out $md
     Ok "+ $name.md"
 }
