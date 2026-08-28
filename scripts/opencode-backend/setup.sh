@@ -22,7 +22,14 @@ CHECKOUT="${CHECKOUT:-$HOME/KiroCrew}"
 VENV="${VENV:-$HOME/.kiro/crew-venv}"
 KIRO_HOME="${KIRO_HOME:-$HOME/.kiro}"
 CREW_HOME="${CREW_HOME:-$KIRO_HOME/crew}"
-ENV_FILE="${ENV_FILE:-/etc/kirocrew/kirocrew.env}"
+PLATFORM="$(uname -s)"
+if [ -z "${ENV_FILE:-}" ]; then
+  if [ "$PLATFORM" = "Darwin" ]; then
+    ENV_FILE="$HOME/.kiro/crew.env"          # launchd has no /etc env file
+  else
+    ENV_FILE="/etc/kirocrew/kirocrew.env"    # systemd EnvironmentFile
+  fi
+fi
 OPENCODE_CONFIG="${OPENCODE_CONFIG:-$HOME/.config/opencode}"
 OPENCODE_JSON="$OPENCODE_CONFIG/opencode.json"
 OPENCODE_AGENT_DIR="$OPENCODE_CONFIG/agent"
@@ -100,7 +107,13 @@ PY
   else
     fail "skills symlink missing/incorrect"
   fi
-  if systemctl is-active --quiet kirocrew 2>/dev/null; then
+  if [ "$PLATFORM" = "Darwin" ]; then
+    if "$VENV/bin/kirocrew" service status >/dev/null 2>&1; then
+      ok "gateway service active"
+    else
+      fail "gateway service not active (kirocrew service install)"
+    fi
+  elif systemctl is-active --quiet kirocrew 2>/dev/null; then
     ok "kirocrew.service active"
   else
     fail "kirocrew.service not active"
@@ -180,20 +193,22 @@ ok "shim: $SHIM -> $OPENCODE_BIN acp"
 
 # ── 6. Service env file ────────────────────────────────────────────────────
 say "Service env ($ENV_FILE)"
-if [ -f "$ENV_FILE" ]; then
-  existing=1
-else
-  existing=0
-  if [ "$SKIP_SERVICE" = "1" ]; then
-    warn "env file missing and --skip-service — creating $HOME/.kiro/crew.env instead"
-    ENV_FILE="$HOME/.kiro/crew.env"
-    touch "$ENV_FILE"
-  fi
+if [ "$SKIP_SERVICE" = "1" ] && [ ! -e "$ENV_FILE" ]; then
+  warn "env file missing and --skip-service — creating $HOME/.kiro/crew.env instead"
+  ENV_FILE="$HOME/.kiro/crew.env"
 fi
 append_env() {
   local key="$1" val="$2"
-  if ! grep -q "^${key}=" "$ENV_FILE"; then
-    if [ "$existing" = "1" ]; then sudo sh -c "echo '$key=$val' >> '$ENV_FILE'"; else echo "$key=$val" >> "$ENV_FILE"; fi
+  if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then return; fi
+  if [ -w "$ENV_FILE" ]; then
+    echo "$key=$val" >> "$ENV_FILE"
+  elif sudo -v 2>/dev/null && sudo sh -c "echo '$key=$val' >> '$ENV_FILE'"; then
+    :
+  else
+    warn "cannot write $ENV_FILE (no sudo) — writing $HOME/.kiro/crew.env instead"
+    ENV_FILE="$HOME/.kiro/crew.env"
+    touch "$ENV_FILE"
+    echo "$key=$val" >> "$ENV_FILE"
   fi
 }
 append_env "KIROCREW_KAS_NODE" "$SHIM"
@@ -298,14 +313,22 @@ ok "config.json updated (backup: config.json.bak)"
 
 # ── 11. Service ────────────────────────────────────────────────────────────
 if [ "$SKIP_SERVICE" != "1" ]; then
-  say "Systemd service"
-  if [ ! -f /etc/systemd/system/kirocrew.service ]; then
-    "$VENV/bin/kirocrew" service install
+  say "Service"
+  if [ "$PLATFORM" = "Darwin" ]; then
+    if [ ! -f "$HOME/Library/LaunchAgents/dev.kirocrew.gateway.plist" ]; then
+      "$VENV/bin/kirocrew" service install
+    fi
+    "$VENV/bin/kirocrew" restart 2>/dev/null || "$VENV/bin/kirocrew" service install
+    ok "gateway restarted (launchd)"
+  else
+    if [ ! -f /etc/systemd/system/kirocrew.service ]; then
+      "$VENV/bin/kirocrew" service install
+    fi
+    sudo systemctl daemon-reload 2>/dev/null || true
+    sudo systemctl reset-failed kirocrew 2>/dev/null || true
+    sudo systemctl restart kirocrew
+    ok "kirocrew.service restarted"
   fi
-  sudo systemctl daemon-reload 2>/dev/null || true
-  sudo systemctl reset-failed kirocrew 2>/dev/null || true
-  sudo systemctl restart kirocrew
-  ok "kirocrew.service restarted"
 fi
 
 # ── 12. Verify ─────────────────────────────────────────────────────────────
