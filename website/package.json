@@ -127,6 +127,7 @@
     "vitest": "^4.1.10"
   },
   "overrides": {
+    "minimatch@3": { "brace-expansion": "1.1.16" },
     "@aws-sdk/types": "3.973.6",
     "@humanfs/core": "0.19.1",
     "@humanfs/node": "0.16.7",
