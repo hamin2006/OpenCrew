@@ -1,5 +1,16 @@
 # Installing and Running Kiro Crew
 
+> **OpenCrew.** This repository's `main` branch is the **opencode backend**
+> fork: the agent is [opencode](https://opencode.ai), not kiro-cli. The
+> supported install is the [OpenCrew setup script](../opencode-backend/setup.sh)
+> (`git clone` + `bash scripts/opencode-backend/setup.sh`), and the
+> authoritative reference is the
+> [OpenCrew setup guide](../opencode-backend/README.md). The sections below
+> describe the stock Kiro Crew build paths; where they mention `kiro-cli`,
+> substitute opencode. Tested on **Linux and macOS** — Windows follows the
+> stock Kiro Crew source install and is not yet an OpenCrew-supported target.
+
+
 This guide covers every way to install Kiro Crew, the first-run setup, how to
 verify the install, and how to troubleshoot the failures that actually happen.
 
@@ -38,29 +49,32 @@ Builds use plain `pip` + `npm`/Vite + `pytest`, driven by the repo-root
 |-------------|------------|-------|
 | **Python** | Backend | `>= 3.10` (`requires-python` in `pyproject.toml`; `make build` provisions a 3.12 `.venv` by default) |
 | **Node.js + npm** | Building the dashboard | `20 \|\| >= 22` (`website/package.json` `engines`); `ensure-node.sh` targets 20, and drops to 16 on Amazon Linux 2 where newer official builds need a glibc that host does not have |
-| **`kiro-cli`** | Driving the LLM | Required; see below |
+| **`opencode`** | Driving the LLM | Required on the OpenCrew (`kas`) backend; see below |
 
 Node is only needed to *build* the dashboard. The prebuilt wheel, the DMG, and
 the AppImage all ship the dashboard already bundled, so end users of those
 artifacts need neither Node nor a compiler.
 
-### Agent backend: `kiro-cli` (required)
+### Agent backend: `opencode` (OpenCrew)
 
-Kiro Crew drives an LLM through the **`kiro-cli`** agent over the
+On the OpenCrew (`kas`) backend the Gateway drives **opencode** over the
 [Agent Client Protocol](https://github.com/zed-industries/agent-client-protocol)
-(ACP). It is the only provider: `agent.provider` is fixed to `acp`, and the
-gateway spawns `kiro-cli acp --agent <name>`.
+(ACP). `agent.provider` is fixed to `acp` and `agent.acp_backend` is `kas`; the
+gateway spawns the configured KAS node (default `~/.local/bin/kiro-kas-shim.sh`,
+which execs `opencode acp`).
 
-Install `kiro-cli` per its own docs, put it on your `PATH`, and log in:
+Install opencode per its own docs, put it on your `PATH`, and authenticate the
+provider you want (e.g. DeepSeek):
 
 ```bash
-kiro-cli login
+curl -fsSL https://opencode.ai/install | bash
+opencode auth login
 ```
 
-If `kiro-cli` is not on `PATH`, spawning a session fails with
-`kiro-cli not found in PATH`. On the first dashboard launch the **Set up Kiro**
-page walks through installing the CLI and completing device-code sign-in.
-`kirocrew doctor` reports both the binary and the login state.
+If opencode is missing or unauthenticated, the gateway's readiness checks and
+`kirocrew doctor` say so instead of starting a session.
+`KIROCREW_KAS_NODE` / `KIROCREW_KAS_SCRIPT` in the service env select the node
+binary and server script. **kiro-cli is never installed or required.**
 
 ### Embeddings: nothing to install
 
@@ -131,7 +145,10 @@ install` to run it as a service.
 ### b. From source (development)
 
 Build the dashboard, install the backend into a local virtualenv (`.venv`), and
-run the gateway straight out of `src/`:
+run the gateway straight out of `src/`. On the OpenCrew backend, first set
+`agent.acp_backend: "kas"` in the gateway config (see the
+[setup script](../opencode-backend/setup.sh)) — `make build` does not install
+or require kiro-cli:
 
 ```bash
 make build                                   # npm build + editable backend install into .venv
@@ -742,14 +759,17 @@ Always start with `kirocrew doctor`.
 
 ### `AcpTimeoutError: ACP prompt timed out`
 
-The `kiro-cli` backend did not answer in time. Five common causes:
+The agent backend did not answer in time. Five common causes:
 
-1. **`kiro-cli` is not installed.** The gateway raises
-   `kiro-cli not found in PATH`. Install it, or use the dashboard's
-   **Set up Kiro** page.
-2. **Not logged in.** Run `kiro-cli login`. An expired session normally
-   surfaces as the distinct, non-retryable "kiro-cli is not logged in" error
-   rather than a timeout, so check this even when the message differs.
+1. **`opencode` is not installed or not on the node path.** The gateway
+   spawns the `KIROCREW_KAS_NODE` shim; if opencode is missing the shim exits
+   and the session fails. Install opencode (`curl -fsSL
+   https://opencode.ai/install | bash`) and confirm with
+   `kirocrew doctor`.
+2. **Not authenticated.** Run `opencode auth login` for the provider you
+   configured. An expired or missing provider credential surfaces as a
+   mid-stream model error rather than a clean timeout, so check this even
+   when the message differs.
 3. **A broken or stale MCP config.** Rebuild it with
    `kirocrew setup --agent-only --clean`. A single unreachable MCP server can
    consume the whole initialization window.
@@ -760,17 +780,14 @@ The `kiro-cli` backend did not answer in time. Five common causes:
    all for 10 minutes is treated as a dead stall and the agent is killed to
    recover the slot.
 5. **The host needs a proxy and the service does not have one.** On a
-   corporate network, `kiro-cli` must reach its backend through your proxy. A
-   systemd service inherits none of your shell's `HTTPS_PROXY`/`HTTP_PROXY`
-   exports, so a gateway that works when run from your terminal can still time
-   out as a service. Set the proxy variables on the unit with a
+   corporate network, opencode must reach its provider API through your proxy.
+   A systemd service inherits none of your shell's
+   `HTTPS_PROXY`/`HTTP_PROXY` exports, so a gateway that works when run from
+   your terminal can still time out as a service. Set the proxy variables on
+   the unit with a
    [systemd drop-in](#setting-other-environment-variables-systemd-drop-in),
    then `sudo systemctl daemon-reload && sudo systemctl restart kirocrew`.
-   Agent sessions inherit the service environment, so this fixes them. One
-   known gap: the first-run setup gate's login probe currently filters proxy
-   variables out even when the unit carries them, so it can stay stuck on
-   "Sign in to Kiro CLI" on a proxied host — that is
-   [issue #2648](https://github.com/kirodotdev/KiroCrew/issues/2648).
+   Agent sessions inherit the service environment, so this fixes them.
 
 ### Memory or knowledge search returns nothing
 
