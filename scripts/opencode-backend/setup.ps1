@@ -37,6 +37,8 @@ $OcJson    = Join-Path $OcConfig "opencode.json"
 $OcAgentDir= Join-Path $OcConfig "agent"
 $SkillsDir = Join-Path $CrewHome "skills"
 $OcSkills  = Join-Path $OcConfig "skills"
+$DefaultModel = if ($env:OPENCREW_MODEL) { $env:OPENCREW_MODEL } else { "deepseek/deepseek-v4-flash" }
+$model = $DefaultModel
 
 function Say($m) { Write-Host "== $m" -ForegroundColor Cyan }
 function Ok($m)  { Write-Host "  [OK] $m" -ForegroundColor Green }
@@ -183,7 +185,7 @@ Ok "env file has KAS_NODE / KAS_SCRIPT / PROJECT_DIR"
 Say "opencode config ($OcJson)"
 New-Item -ItemType Directory -Path $OcConfig -Force | Out-Null
 if (-not (Test-Path $OcJson)) {
-    Set-Utf8NoBom $OcJson '{"$schema":"https://opencode.ai/config.json","model":"deepseek/deepseek-v4-flash","permission":"allow"}'
+    Set-Utf8NoBom $OcJson ("{\"$schema\":\"https://opencode.ai/config.json\",\"model\":\"$DefaultModel\",\"permission\":\"allow\"}")
 }
 $cfg = $null
 try { $cfg = Get-Content $OcJson -Raw | ConvertFrom-Json } catch { }
@@ -194,7 +196,7 @@ if (-not $cfg) {
 } else {
 if (-not $cfg.agent) { $cfg | Add-Member -NotePropertyName agent -NotePropertyValue ([pscustomobject]@{}) }
 if (-not $cfg.mcp)   { $cfg | Add-Member -NotePropertyName mcp -NotePropertyValue ([pscustomobject]@{}) }
-$model = "deepseek/deepseek-v4-flash"
+if ($cfg.model) { $model = $cfg.model }
 $agents = [ordered]@{
     "kirocrew"            = [pscustomobject]@{ description = "Kiro Crew persistent assistant agent"; mode = "primary"; model = $model }
     "kirocrew-lite"       = [pscustomobject]@{ description = "Kiro Crew lite assistant agent"; mode = "primary"; model = $model }

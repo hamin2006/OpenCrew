@@ -18,6 +18,7 @@ set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/hamin2006/OpenCrew.git}"
 WHEEL_VERSION="${WHEEL_VERSION:-0.3.0}"
+MODEL="${OPENCREW_MODEL:-deepseek/deepseek-v4-flash}"
 CHECKOUT="${CHECKOUT:-$HOME/KiroCrew}"
 VENV="${VENV:-$HOME/.kiro/crew-venv}"
 KIRO_HOME="${KIRO_HOME:-$HOME/.kiro}"
@@ -220,14 +221,18 @@ ok "env file has KAS_NODE / KAS_SCRIPT / PROJECT_DIR"
 say "opencode config ($OPENCODE_JSON)"
 mkdir -p "$OPENCODE_CONFIG"
 if [ ! -f "$OPENCODE_JSON" ]; then
-  printf '{ "$schema": "https://opencode.ai/config.json", "model": "deepseek/deepseek-v4-flash", "permission": "allow" }\n' > "$OPENCODE_JSON"
+  printf '{ "$schema": "https://opencode.ai/config.json", "model": "%s", "permission": "allow" }\n' "$MODEL" > "$OPENCODE_JSON"
 fi
 cp "$OPENCODE_JSON" "$OPENCODE_JSON.bak"
 KIROCREW_BIN="$VENV/bin/kirocrew" python3 - "$OPENCODE_JSON" <<'PY'
 import json, os, sys
 path = sys.argv[1]
 cfg = json.load(open(path))
-model = "deepseek/deepseek-v4-flash"
+model = (
+    os.environ.get("OPENCREW_MODEL")
+    or cfg.get("model")
+    or "deepseek/deepseek-v4-flash"
+)
 agents = {
     "kirocrew": {"description": "Kiro Crew persistent assistant agent", "mode": "primary", "model": model},
     "kirocrew-lite": {"description": "Kiro Crew lite assistant agent", "mode": "primary", "model": model},
@@ -250,10 +255,16 @@ ok "opencode.json updated (backup: opencode.json.bak)"
 # ── 8. Agent prompts ───────────────────────────────────────────────────────
 say "Agent prompts ($OPENCODE_AGENT_DIR)"
 mkdir -p "$OPENCODE_AGENT_DIR"
-python3 - "$KIRO_AGENTS_DIR" "$OPENCODE_AGENT_DIR" <<'PY'
-import json, pathlib, sys
-kiro_dir, out_dir = map(pathlib.Path, sys.argv[1:])
-model = "deepseek/deepseek-v4-flash"
+python3 - "$KIRO_AGENTS_DIR" "$OPENCODE_AGENT_DIR" "$OPENCODE_JSON" <<'PY'
+import json, os, pathlib, sys
+kiro_dir, out_dir, oc_json = map(pathlib.Path, sys.argv[1:])
+model = os.environ.get("OPENCREW_MODEL") or "deepseek/deepseek-v4-flash"
+try:
+    _cfg = json.loads(oc_json.read_text(encoding="utf-8"))
+    if _cfg.get("model"):
+        model = _cfg["model"]
+except Exception:
+    pass
 fallbacks = {
     "kirocrew-research": "Autonomous research worker — runs one research cycle per turn.",
     "kirocrew-heartbeat": "Unattended polling worker — runs one HeartbeatService task per cycle.",
