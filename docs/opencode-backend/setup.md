@@ -1,8 +1,8 @@
 # opencode-backend
 
 This branch turns Kiro Crew's ACP agent backend into **opencode** (headless,
-self-hosted LLM stack) instead of kiro-cli. It is the running config of the
-author's Haminator PC (Ubuntu 24.04, systemd service).
+self-hosted LLM stack) instead of kiro-cli. Tested on Linux (Ubuntu 24.04,
+64-bit) and macOS, with the gateway running as a systemd service.
 
 ## What this branch changes (vs v0.3.0)
 

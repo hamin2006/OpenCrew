@@ -32,7 +32,7 @@ tracking, compaction, resume) are patched to speak opencode's dialect.
 
 | Requirement | Notes |
 |-------------|-------|
-| **Linux (Ubuntu 24.04 tested)** or macOS | the author runs Ubuntu 24.04 x86_64 |
+| **Linux (Ubuntu 24.04 tested)** or macOS | tested on Ubuntu 24.04 x86_64 |
 | **Python 3.12** | provided by the kirocrew installer (`~/.kiro/crew-venv`) |
 | **Node.js 22+** | required by opencode |
 | **opencode** | installed at `~/.opencode/bin/opencode` |
