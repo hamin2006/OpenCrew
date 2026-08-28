@@ -104,6 +104,7 @@ if ((Test-Path $Checkout) -and -not (Test-Path (Join-Path $Checkout ".git"))) {
 if (-not (Test-Path (Join-Path $Checkout ".git"))) {
     Say "Cloning OpenCrew"
     git clone $RepoUrl $Checkout | Out-Null
+    if (-not (Test-Path (Join-Path $Checkout ".git"))) { Fail "clone failed"; exit 1 }
     git -C $Checkout remote add upstream https://github.com/kirodotdev/KiroCrew.git 2>$null
 }
 Ok "checkout: $Checkout"
@@ -145,7 +146,15 @@ if (Test-Path (Join-Path $Checkout "src\kiro_crew\static\dist\index.html")) {
     $extract = Join-Path $env:TEMP "kc-wheel-x"
     if (Test-Path $extract) { Remove-Item -Recurse -Force $extract }
     New-Item -ItemType Directory -Path $extract | Out-Null
-    tar -xf $wheel -C $extract "kiro_crew/static"
+    $tarOk = $false
+    if (Get-Command tar -ErrorAction SilentlyContinue) {
+        tar -xf $wheel -C $extract "kiro_crew/static" 2>$null
+        $tarOk = Test-Path (Join-Path $extract "kiro_crew\static")
+    }
+    if (-not $tarOk) {
+        # Fallback: extract the whole wheel with the venv python (a .whl is a zip).
+        & $VenvPy -c "import zipfile; zipfile.ZipFile(r'$wheel').extractall(r'$extract')"
+    }
     $dst = Join-Path $Checkout "src\kiro_crew\static"
     if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
     Copy-Item -Recurse (Join-Path $extract "kiro_crew\static") $dst
@@ -174,7 +183,7 @@ Ok "env file has KAS_NODE / KAS_SCRIPT / PROJECT_DIR"
 Say "opencode config ($OcJson)"
 New-Item -ItemType Directory -Path $OcConfig -Force | Out-Null
 if (-not (Test-Path $OcJson)) {
-    '{"$schema":"https://opencode.ai/config.json","model":"deepseek/deepseek-v4-flash","permission":"allow"}' | Set-Content $OcJson -Encoding UTF8
+    Set-Utf8NoBom $OcJson '{"$schema":"https://opencode.ai/config.json","model":"deepseek/deepseek-v4-flash","permission":"allow"}'
 }
 $cfg = $null
 try { $cfg = Get-Content $OcJson -Raw | ConvertFrom-Json } catch { }
@@ -255,7 +264,7 @@ Say "Crew config ($CrewHome\config.json)"
 New-Item -ItemType Directory -Path $CrewHome -Force | Out-Null
 $config = Join-Path $CrewHome "config.json"
 if (-not (Test-Path $config)) {
-    '{"agent":{"acp_backend":"kas"}}' | Set-Content $config -Encoding UTF8
+    Set-Utf8NoBom $config '{"agent":{"acp_backend":"kas"}}'
 }
 $cc = $null
 try { $cc = Get-Content $config -Raw | ConvertFrom-Json } catch { }
