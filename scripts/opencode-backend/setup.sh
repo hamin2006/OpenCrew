@@ -121,11 +121,22 @@ fi
 ok "crew venv: $VENV"
 
 # ── 2. Checkout ────────────────────────────────────────────────────────────
+if [ -d "$CHECKOUT" ] && [ ! -d "$CHECKOUT/.git" ]; then
+  fail "checkout path $CHECKOUT exists but is not a git repository"
+  echo "       Move it aside or point CHECKOUT elsewhere, e.g.:"
+  echo "       CHECKOUT=\$HOME/OpenCrew bash $0"
+  exit 1
+fi
 if [ ! -d "$CHECKOUT/.git" ]; then
   say "Cloning OpenCrew"
   git clone "$REPO_URL" "$CHECKOUT"
   git -C "$CHECKOUT" remote add upstream https://github.com/kirodotdev/KiroCrew.git || true
 fi
+_origin="$(git -C "$CHECKOUT" remote get-url origin 2>/dev/null || true)"
+case "$_origin" in
+  *OpenCrew*|*KiroCrew*|*kirodotdev*|*hamin2006*) ;;
+  *) warn "origin ($_origin) is not an OpenCrew/Kiro Crew remote — is this the right checkout?" ;;
+esac
 ok "checkout: $CHECKOUT ($(git -C "$CHECKOUT" branch --show-current))"
 
 # ── 3. Editable install + .venv symlink ────────────────────────────────────
