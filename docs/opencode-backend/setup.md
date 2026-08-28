@@ -74,6 +74,14 @@ All of this lives outside the package and survives any kirocrew update:
   `heartbeat.default_deliver: "dashboard"`
 - **`~/.kiro/crew/.env`** — `TELEGRAM_BOT_TOKEN=...`
 
+## kiro-cli severance
+
+The opencode (kas) runtime has **zero kiro-cli dependency**: no boot probe, no
+usage/credit scrape, no readiness gate. `kiro-cli` binaries, its state dirs
+(`~/.kiro/sessions`, `~/.kiro/settings`, `~/.kiro/crew-auth-staging`) can be
+deleted; the kiro backend remains only as a dormant code option. `kirocrew
+doctor` reports the opencode node; the dashboard credit pill hides.
+
 ## Update workflow
 
 Because `KIROCREW_PROJECT_DIR` points at this checkout, the gateway treats
