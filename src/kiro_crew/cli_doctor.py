@@ -1048,17 +1048,21 @@ def _report_kas_backend(issues: list[str]) -> None:
 
     # Token status — a bounded live probe through kiro-cli. Advisory: an
     # unobtainable token is usually a transient login state, not a broken
-    # install, so it warns rather than failing the doctor run.
-    try:
-        resp = asyncio.run(kas_auth.resolve_kas_access_token(timeout=8.0))
-    except kas_auth.KasAuthCallbackError as exc:
-        print(f"  token:       ⚠️  not obtainable: {exc}")
-        print("               Fix: sign in with `kiro-cli login`.")
-    except Exception as exc:  # noqa: BLE001 - diagnostic must never abort the run
-        print(f"  token:       ⚠️  probe error: {exc}")
+    # install, so it warns rather than failing the doctor run. The opencode
+    # (kas) backend has no kiro-cli token at all — auth lives in opencode.
+    if not shutil.which(KIRO_CLI_BIN):
+        print("  token:       ⏭  opencode backend — auth via `opencode auth login`")
     else:
-        expires = resp.get("expiresAt")
-        print(f"  token:       ✅ obtained via kiro-cli (expires {expires})")
+        try:
+            resp = asyncio.run(kas_auth.resolve_kas_access_token(timeout=8.0))
+        except kas_auth.KasAuthCallbackError as exc:
+            print(f"  token:       ⚠️  not obtainable: {exc}")
+            print("               Fix: sign in with `kiro-cli login`.")
+        except Exception as exc:  # noqa: BLE001 - diagnostic must never abort the run
+            print(f"  token:       ⚠️  probe error: {exc}")
+        else:
+            expires = resp.get("expiresAt")
+            print(f"  token:       ✅ obtained via kiro-cli (expires {expires})")
 
 
 def _doctor(platform_boot_error: "Exception | None" = None, bundle: bool = False) -> None:
