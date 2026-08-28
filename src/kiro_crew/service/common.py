@@ -153,6 +153,17 @@ def service_environment(home: str) -> "dict[str, str]":
     port = os.environ.get("KIROCREW_PORT", "").strip()
     if port:
         env["KIROCREW_PORT"] = port
+    # OpenCrew: the KAS node/script/project pins are as install-time-frozen as
+    # KIROCREW_PORT — propagated the same way so the launchd plist and the
+    # systemd Environment= carry them when the installer had them set.
+    for kas_key in (
+        "KIROCREW_KAS_NODE",
+        "KIROCREW_KAS_SCRIPT",
+        "KIROCREW_PROJECT_DIR",
+    ):
+        kas_val = os.environ.get(kas_key, "").strip()
+        if kas_val:
+            env[kas_key] = kas_val
     return env
 
 

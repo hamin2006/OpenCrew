@@ -91,12 +91,15 @@ def resolve_opencode_bin() -> str | None:
     found = shutil.which("opencode")
     if found:
         return found
+    _home = pathlib.Path.home()
     for cand in (
-        pathlib.Path.home() / ".opencode" / "bin" / "opencode",
-        pathlib.Path.home() / ".local" / "bin" / "opencode",
+        _home / ".opencode" / "bin" / "opencode",
+        _home / ".opencode" / "bin" / "opencode.exe",
+        _home / ".local" / "bin" / "opencode",
+        _home / "AppData" / "Local" / "opencode" / "opencode.exe",
         pathlib.Path("/usr/local/bin/opencode"),
     ):
-        if cand.is_file() and os.access(cand, os.X_OK):
+        if cand.is_file() and os.access(cand, os.X_OK if os.name == "posix" else os.R_OK):
             return str(cand)
     return None
 
@@ -112,10 +115,10 @@ def _env_file_override(key: str) -> str:
     """
     if os.environ.get(key, "").strip():
         return os.environ[key]
-    for candidate in (
-        pathlib.Path("/etc/kirocrew/kirocrew.env"),
-        pathlib.Path("~/.kiro/crew.env").expanduser(),
-    ):
+    candidates = [pathlib.Path("~/.kiro/crew.env").expanduser()]
+    if os.name == "posix":
+        candidates.insert(0, pathlib.Path("/etc/kirocrew/kirocrew.env"))
+    for candidate in candidates:
         try:
             for line in candidate.read_text(encoding="utf-8", errors="replace").splitlines():
                 line = line.strip()
@@ -210,7 +213,7 @@ def build_kas_argv(node: Path, server_script: Path) -> list[str]:
     ``--auth``), which needs a ``~/.aws/sso/cache`` token that the cli does not
     write.
     """
-    if str(server_script) == "/bin/true":
+    if server_script.name.lower() in ("true", "true.exe") or str(server_script) == "/bin/true":
         # OpenCrew: the node IS the server (the shim execs `opencode acp`), and
         # /bin/true is the documented no-server-script sentinel. Spawn the node
         # bare — KAS-only flags (--auth=acp-callback, transport, node flags)
