@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     OpenCrew setup for Windows (experimental, source install — no service).
 
@@ -42,6 +42,10 @@ function Say($m) { Write-Host "== $m" -ForegroundColor Cyan }
 function Ok($m)  { Write-Host "  [OK] $m" -ForegroundColor Green }
 function Warn($m){ Write-Host "  [!] $m" -ForegroundColor Yellow }
 function Fail($m){ Write-Host "  [X] $m" -ForegroundColor Red }
+function Set-Utf8NoBom($Path, $Content) {
+    $enc = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Content, $enc)
+}
 
 # ── Preflight ─────────────────────────────────────────────────────────────
 Say "Preflight"
@@ -119,6 +123,7 @@ if (-not (Test-Path (Join-Path $Checkout ".venv\Scripts\python.exe"))) {
     Pop-Location
 }
 $VenvPy = Join-Path $Checkout ".venv\Scripts\python.exe"
+if (-not (Test-Path $VenvPy)) { Fail "venv creation failed — install Python 3.10+ (python.org) and re-run"; exit 1 }
 Ok "venv: $VenvPy"
 
 # ── 3. Editable install ───────────────────────────────────────────────────
@@ -171,7 +176,13 @@ New-Item -ItemType Directory -Path $OcConfig -Force | Out-Null
 if (-not (Test-Path $OcJson)) {
     '{"$schema":"https://opencode.ai/config.json","model":"deepseek/deepseek-v4-flash","permission":"allow"}' | Set-Content $OcJson -Encoding UTF8
 }
-$cfg = Get-Content $OcJson -Raw | ConvertFrom-Json
+$cfg = $null
+try { $cfg = Get-Content $OcJson -Raw | ConvertFrom-Json } catch { }
+if (-not $cfg) {
+    Warn "opencode.json could not be parsed (comments or trailing commas are allowed by opencode but not by PowerShell's JSON parser)."
+    Warn "Backing it up as opencode.json.bak and SKIPPING the agents/MCP merge — merge manually per docs/opencode-backend/README.md."
+    Copy-Item $OcJson ($OcJson + ".bak") -Force
+} else {
 if (-not $cfg.agent) { $cfg | Add-Member -NotePropertyName agent -NotePropertyValue ([pscustomobject]@{}) }
 if (-not $cfg.mcp)   { $cfg | Add-Member -NotePropertyName mcp -NotePropertyValue ([pscustomobject]@{}) }
 $model = "deepseek/deepseek-v4-flash"
@@ -195,8 +206,9 @@ foreach ($k in $mcp.Keys) {
     $exists = $cfg.mcp.PSObject.Properties.Name -contains $k
     if (-not $exists) { $cfg.mcp | Add-Member -NotePropertyName $k -NotePropertyValue $mcp[$k] }
 }
-$cfg | ConvertTo-Json -Depth 12 | Set-Content $OcJson -Encoding UTF8
+$cfg | ConvertTo-Json -Depth 12 | Set-Utf8NoBom $OcJson
 Ok "opencode.json updated"
+}
 
 # ── 7. Agent prompts ──────────────────────────────────────────────────────
 Say "Agent prompts ($OcAgentDir)"
@@ -219,7 +231,7 @@ foreach ($name in $fallbacks.Keys) {
         if ($data.description) { $desc = $data.description }
     }
     $md = "---`ndescription: $desc`nmode: primary`nmodel: $model`n---`n`n$prompt`n"
-    Set-Content -Path $out -Value $md -Encoding UTF8
+    Set-Utf8NoBom $out $md
     Ok "+ $name.md"
 }
 
@@ -245,11 +257,17 @@ $config = Join-Path $CrewHome "config.json"
 if (-not (Test-Path $config)) {
     '{"agent":{"acp_backend":"kas"}}' | Set-Content $config -Encoding UTF8
 }
-$cc = Get-Content $config -Raw | ConvertFrom-Json
+$cc = $null
+try { $cc = Get-Content $config -Raw | ConvertFrom-Json } catch { }
+if (-not $cc) {
+    Warn "config.json could not be parsed — backing it up and SKIPPING. Set agent.acp_backend=kas and agent.sandbox_allow_unsandboxed_exec=true manually."
+    Copy-Item $config ($config + ".bak") -Force
+} else {
 if (-not $cc.agent) { $cc | Add-Member -NotePropertyName agent -NotePropertyValue ([pscustomobject]@{}) }
 $cc.agent | Add-Member -NotePropertyName acp_backend -NotePropertyValue "kas" -Force
 $cc.agent | Add-Member -NotePropertyName sandbox_allow_unsandboxed_exec -NotePropertyValue $true -Force
-$cc | ConvertTo-Json -Depth 8 | Set-Content $config -Encoding UTF8
+$cc | ConvertTo-Json -Depth 8 | Set-Utf8NoBom $config
+}
 Warn "Windows has no OS sandbox for the agent: sandbox_allow_unsandboxed_exec is set (stock fail-closed would refuse to run otherwise). This is the documented tradeoff — review it."
 
 # ── 10. Run instructions ──────────────────────────────────────────────────
