@@ -328,10 +328,16 @@ for name, fallback in fallbacks.items():
     if src.exists():
         data = json.loads(src.read_text())
         prompt = (data.get("prompt") or "").strip() or fallback
-        desc = (data.get("description") or fallback).strip().replace('"', "'")
+        desc = (data.get("description") or fallback).strip()
     else:
         prompt, desc = fallback, fallback
-    out.write_text(f"---\ndescription: {desc}\nmode: primary\n---\n\n{prompt}\n")
+    # YAML frontmatter: a description containing ": " or extra whitespace
+    # would break the parse - flatten and double-quote it.
+    _desc = " ".join(desc.split())
+    _desc = _desc.replace("\\", "\\\\").replace('"', '\\"')
+    out.write_text(
+        f"---\ndescription: \"{_desc}\"\nmode: primary\n---\n\n{prompt}\n"
+    )
     print(f"+ {out.name} ({len(prompt)} chars)")
 PY
 ok "agent prompts present"

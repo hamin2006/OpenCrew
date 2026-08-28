@@ -299,7 +299,11 @@ foreach ($name in $fallbacks.Keys) {
         if ($data.prompt) { $prompt = $data.prompt }
         if ($data.description) { $desc = $data.description }
     }
-    $md = "---`ndescription: $desc`nmode: primary`n---`n`n$prompt`n"
+    # YAML frontmatter: flatten newlines and double-quote so a description
+    # containing ": " cannot break the parse.
+    $descFlat = ($desc -replace "\s+", " ").Trim()
+    $descFlat = $descFlat -replace '\\', '\\\\' -replace '"', '\"'
+    $md = "---`ndescription: \"$descFlat\"`nmode: primary`n---`n`n$prompt`n"
     Set-Utf8NoBom $out $md
     Ok "+ $name.md"
 }
