@@ -1238,6 +1238,14 @@ class SessionManager:
                     # has the same posture rather than a stricter accidental one.
                     runtime = AcpRuntime(
                         agent="kirocrew-lite",
+                        # The bg runtime must spawn the SAME backend every other
+                        # runtime uses (mirrors the provider factory, which
+                        # passes acp_backend=agent.acp_backend). Omitting it
+                        # defaulted this respawn path to kiro-cli and broke
+                        # every bg one-liner (chat titles, suggestions, STT
+                        # endpointing) on KAS installs — "kiro-cli not found in
+                        # PATH" on recycle/respawn.
+                        acp_backend=getattr(self._cfg.agent, "acp_backend", ""),
                         sandbox_mode=getattr(self._cfg.agent, "sandbox", "auto"),
                         # kirocrew-lite's config is written by Kiro Crew itself
                         # with an empty mcpServers map, so no MCP server can
