@@ -1186,7 +1186,10 @@ class TelegramDispatcher:
             [{"text": label, "callback_data": f"mp:{pid}"}]
             for pid, label in rows
         ]
-        header = f"Current model: {current or 'Auto'}\nPick a provider:"
+        header = (
+            f"Current model: {current or 'Auto'}\nPick a provider, "
+            f"or send /model <name> to search all models:"
+        )
         message_id = await self._reply(
             chat_id,
             header,
