@@ -74,6 +74,25 @@ All of this lives outside the package and survives any kirocrew update:
   `heartbeat.default_deliver: "dashboard"`
 - **`~/.kiro/crew/.env`** — `TELEGRAM_BOT_TOKEN=...`
 
+## Operations
+
+- **Backups.** The gateway ships a snapshot tool — run it nightly and keep a
+  few generations:
+  ```sh
+  0 3 * * * ~/.kiro/crew-venv/bin/kirocrew snapshot ~/.kiro/crew-backups --keep 7
+  ```
+  The venv itself is re-creatable from the fork; a tar of the editable
+  checkout plus `pip install -e` restores it.
+- **Secrets hygiene.** Tokens live in `~/.kiro/crew/.env` (600) and opencode's
+  credential store (`~/.local/share/opencode/auth.json`, 600) — never in the
+  repo. The setup script writes only placeholders.
+- **Updates.** `git fetch upstream && git merge upstream/main` on the checkout,
+  then `sudo systemctl restart kirocrew`. Never run the official
+  `cli.sh` installer.
+- **Disk.** The gateway data home (`~/.kiro/crew`) can grow with session
+  history and models; watch `du -sh ~/.kiro/crew` and prune old snapshots
+  (the `--keep` flag handles this).
+
 ## kiro-cli severance
 
 The opencode (kas) runtime has **zero kiro-cli dependency**: no boot probe, no
