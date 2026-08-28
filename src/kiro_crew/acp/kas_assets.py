@@ -80,6 +80,27 @@ def _kiro_data_dirs() -> list[Path]:
     return candidates
 
 
+def resolve_opencode_bin() -> str | None:
+    """The opencode binary, resolved portably.
+
+    Prefers PATH, then the standard install locations. Never hardcodes a
+    per-machine path — the KAS node shim can point anywhere.
+    """
+    import shutil
+
+    found = shutil.which("opencode")
+    if found:
+        return found
+    for cand in (
+        pathlib.Path.home() / ".opencode" / "bin" / "opencode",
+        pathlib.Path.home() / ".local" / "bin" / "opencode",
+        pathlib.Path("/usr/local/bin/opencode"),
+    ):
+        if cand.is_file() and os.access(cand, os.X_OK):
+            return str(cand)
+    return None
+
+
 def _env_file_override(key: str) -> str:
     """Value of *key* from the service env file when the process env lacks it.
 

@@ -7,7 +7,7 @@ import pathlib
 import sys
 
 HANDLERS = pathlib.Path(
-    "/home/harsh-amin/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/dashboard/chat_handlers.py"
+    "/home/<user>/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/dashboard/chat_handlers.py"
 )
 
 OLD = (

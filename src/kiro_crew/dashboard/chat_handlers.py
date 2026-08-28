@@ -21,6 +21,7 @@ from aiohttp.client_exceptions import ClientConnectionResetError
 
 from kiro_crew import model_registry
 from kiro_crew.acp.client import AcpModelUnavailable
+from kiro_crew.acp.kas_assets import resolve_opencode_bin
 from kiro_crew.agent_discovery import cached_project_agent_names, warm_project_agent_names
 from kiro_crew.config.loader import (
     KiroCrewConfig,
@@ -3128,7 +3129,7 @@ async def _opencode_model_catalog() -> dict[str, str]:
         and _now - _OPENCODE_MODEL_CATALOG[1] < _OPENCODE_MODEL_CATALOG_TTL
     ):
         return _OPENCODE_MODEL_CATALOG[0]
-    _bin = "/home/harsh-amin/.opencode/bin/opencode"
+    _bin = resolve_opencode_bin() or "opencode"
     _PROVIDER_DISPLAY = {
         "opencode": "OpenCode",
         "opencode-go": "OpenCode Go",

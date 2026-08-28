@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from kiro_crew.acp.client import AcpError
+from kiro_crew.acp.kas_assets import resolve_opencode_bin
 from kiro_crew.executors import run_in_embed_pool
 from kiro_crew.hooks import TOOL_AUTO_APPROVE, TOOL_DENY
 from kiro_crew.messaging.attachments import IngestLimits, append_attachment_context
@@ -155,7 +156,7 @@ _MODEL_PICKER_MAX = 50
 _MODEL_PICKER_LIMIT = 24
 
 # opencode binary for the /model catalog fallback (dashboard /api/models parity).
-_OPENCODE_MODELS_BIN = "/home/harsh-amin/.opencode/bin/opencode"
+_OPENCODE_MODELS_BIN = resolve_opencode_bin() or "opencode"
 
 # Display names for opencode provider ids in the /model pickers.
 _OPENCODE_PROVIDER_DISPLAY = {

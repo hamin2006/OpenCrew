@@ -3,7 +3,7 @@
 import pathlib
 
 PATH = pathlib.Path(
-    "/home/harsh-amin/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/dashboard/chat_utils.py"
+    "/home/<user>/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/dashboard/chat_utils.py"
 )
 
 OLD = '    {"/quit", "/exit", "/q", "/chat", "/paste", "/reply", "/editor", "/tangent", "/issue", "/experiment", "/code", "/side", "/tools", "/mcp", "/logdump", "/hooks"}\n'

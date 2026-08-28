@@ -18,7 +18,7 @@ import pathlib
 import re
 import subprocess
 
-_OPENCODE_BIN = "/home/harsh-amin/.opencode/bin/opencode"
+_OPENCODE_BIN = "/home/<user>/.opencode/bin/opencode"
 _OPENCODE_CONFIG = pathlib.Path(
     os.path.expanduser("~/.config/opencode/opencode.json")
 )
@@ -84,7 +84,7 @@ def opencode_mcp_list() -> dict | None:
             env={
                 **os.environ,
                 "PATH": os.environ.get("PATH", "")
-                + ":/home/harsh-amin/.local/bin",
+                + ":/home/<user>/.local/bin",
             },
         )
         out = proc.stdout or ""

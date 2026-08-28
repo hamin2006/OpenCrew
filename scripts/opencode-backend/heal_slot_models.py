@@ -7,7 +7,7 @@ pick change stop rendering "isn't offered right now" without a re-pick.
 import pathlib
 
 PATH = pathlib.Path(
-    "/home/harsh-amin/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/dashboard/chat_persistence.py"
+    "/home/<user>/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/dashboard/chat_persistence.py"
 )
 
 HELPER = '''

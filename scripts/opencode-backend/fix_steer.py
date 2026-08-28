@@ -10,7 +10,7 @@ import pathlib
 import sys
 
 HANDLE = pathlib.Path(
-    "/home/harsh-amin/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/acp/session_handle.py"
+    "/home/<user>/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/acp/session_handle.py"
 )
 
 EDITS = [

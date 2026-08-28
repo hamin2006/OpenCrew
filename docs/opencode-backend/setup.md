@@ -29,7 +29,8 @@ self-hosted LLM stack) instead of kiro-cli. Tested on Linux (Ubuntu 24.04,
 
 `scripts/opencode-backend/` holds the original one-shot patch scripts (exact
 edits applied to the 0.3.0 wheel) — kept as documentation and an emergency
-re-apply tool.
+re-apply tool. Paths there are written as `/home/<user>/...` placeholders;
+substitute your user before running one.
 
 ## Non-code setup (not in this repo — reproduce on a fresh machine)
 

@@ -3,7 +3,7 @@
 import asyncio
 import sys
 
-sys.path.insert(0, "/home/harsh-amin/.kiro/crew-venv/lib/python3.12/site-packages")
+sys.path.insert(0, "/home/<user>/.kiro/crew-venv/lib/python3.12/site-packages")
 
 from kiro_crew.acp.client import AcpClient
 from kiro_crew.acp.runtime import AcpRuntime

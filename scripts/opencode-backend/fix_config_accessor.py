@@ -9,10 +9,10 @@ import pathlib
 import sys
 
 RUNNER = pathlib.Path(
-    "/home/harsh-amin/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/dashboard/chat_runner.py"
+    "/home/<user>/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/dashboard/chat_runner.py"
 )
 HANDLERS = pathlib.Path(
-    "/home/harsh-amin/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/dashboard/chat_handlers.py"
+    "/home/<user>/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/dashboard/chat_handlers.py"
 )
 
 RUNNER_OLD = '            for _opt in getattr(_client, "_config_options", None) or []:\n'

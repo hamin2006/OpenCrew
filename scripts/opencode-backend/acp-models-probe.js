@@ -1,6 +1,6 @@
 // Dump opencode ACP session/new: models field, availableModels, model select.
 const { spawn } = require("child_process");
-const child = spawn(process.argv[2] || "/home/harsh-amin/.opencode/bin/opencode", ["acp"], {
+const child = spawn(process.argv[2] || "/home/<user>/.opencode/bin/opencode", ["acp"], {
   stdio: ["pipe", "pipe", "inherit"],
 });
 let buf = "";

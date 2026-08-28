@@ -13,7 +13,7 @@ import pathlib
 import sys
 
 WHEEL = pathlib.Path(
-    "/home/harsh-amin/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew"
+    "/home/<user>/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew"
 )
 RUNTIME = WHEEL / "acp/runtime.py"
 GATEWAY = WHEEL / "slack/gateway.py"

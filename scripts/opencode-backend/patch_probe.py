@@ -1,6 +1,6 @@
 import pathlib
 
-p = pathlib.Path("/home/harsh-amin/acp-models-probe.js")
+p = pathlib.Path("/home/<user>/acp-models-probe.js")
 t = p.read_text()
 old = '      console.log("MODEL SELECT:", JSON.stringify(sel).slice(0, 2000));'
 new = """      for (const o of sel.options || []) {

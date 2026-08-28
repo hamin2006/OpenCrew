@@ -1,6 +1,6 @@
 import sys
 
-p = "/home/harsh-amin/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/acp/session_handle.py"
+p = "/home/<user>/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/acp/session_handle.py"
 src = open(p).read()
 old = '''        if session_update == "usage_update":
             used, size = parse_usage_update(update)

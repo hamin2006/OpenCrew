@@ -13,11 +13,11 @@ OPENCODE_JSON = pathlib.Path.home() / ".config/opencode/opencode.json"
 cfg = json.loads(OPENCODE_JSON.read_text())
 mcp = cfg.setdefault("mcp", {})
 mcp["kirocrew-core"] = {
-    "command": "/home/harsh-amin/.kiro/crew-venv/bin/kirocrew",
+    "command": "/home/<user>/.kiro/crew-venv/bin/kirocrew",
     "args": ["mcp-core"],
 }
 mcp["kirocrew-cron"] = {
-    "command": "/home/harsh-amin/.kiro/crew-venv/bin/kirocrew",
+    "command": "/home/<user>/.kiro/crew-venv/bin/kirocrew",
     "args": ["mcp-cron"],
 }
 tmp = OPENCODE_JSON.with_suffix(".json.tmp")

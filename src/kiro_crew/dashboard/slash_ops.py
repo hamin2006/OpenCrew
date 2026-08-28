@@ -18,7 +18,9 @@ import pathlib
 import re
 import subprocess
 
-_OPENCODE_BIN = "/home/harsh-amin/.opencode/bin/opencode"
+from kiro_crew.acp.kas_assets import resolve_opencode_bin
+
+_OPENCODE_BIN = resolve_opencode_bin() or "opencode"
 _OPENCODE_CONFIG = pathlib.Path(
     os.path.expanduser("~/.config/opencode/opencode.json")
 )
@@ -84,7 +86,8 @@ def opencode_mcp_list() -> dict | None:
             env={
                 **os.environ,
                 "PATH": os.environ.get("PATH", "")
-                + ":/home/harsh-amin/.local/bin",
+                + f":{os.path.expanduser("~/.local/bin")}"
+                + (f":{os.path.dirname(_OPENCODE_BIN)}" if "/" in _OPENCODE_BIN else ""),
             },
         )
         out = proc.stdout or ""

@@ -11,7 +11,7 @@ import pathlib
 import sys
 
 HANDLERS = pathlib.Path(
-    "/home/harsh-amin/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/dashboard/chat_handlers.py"
+    "/home/<user>/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/dashboard/chat_handlers.py"
 )
 
 # ── 1: helpers + constants before api_chat_slot_model ──
@@ -30,7 +30,7 @@ HELPERS_NEW = (
     "        and _now - _OPENCODE_MODEL_CATALOG[1] < _OPENCODE_MODEL_CATALOG_TTL\n"
     "    ):\n"
     "        return _OPENCODE_MODEL_CATALOG[0]\n"
-    "    _bin = \"/home/harsh-amin/.opencode/bin/opencode\"\n"
+    "    _bin = \"/home/<user>/.opencode/bin/opencode\"\n"
     "    _PROVIDER_DISPLAY = {\n"
     '        "opencode": "OpenCode",\n'
     '        "opencode-go": "OpenCode Go",\n'

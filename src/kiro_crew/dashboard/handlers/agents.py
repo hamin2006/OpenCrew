@@ -17,6 +17,7 @@ from aiohttp import web
 
 from kiro_crew import agent_state, model_registry
 from kiro_crew.acp.client import advertised_model_ids, model_is_unusable
+from kiro_crew.acp.kas_assets import resolve_opencode_bin
 from kiro_crew.agent import AGENT_FILENAME, get_shipped_tools, install_agent, kiro_agents_dir_path
 from kiro_crew.agent_discovery import (
     clear_list_agents_cache,
@@ -948,7 +949,7 @@ async def api_models(request: web.Request) -> web.Response:
         "github-copilot": "GitHub Copilot",
     }
 
-    opencode_bin = "/home/harsh-amin/.opencode/bin/opencode"
+    opencode_bin = resolve_opencode_bin() or "opencode"
     argv = [opencode_bin, "models", "--verbose"]
     try:
         proc = await create_subprocess_limited(

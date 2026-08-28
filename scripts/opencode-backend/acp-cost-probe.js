@@ -1,6 +1,6 @@
 const { spawn } = require("child_process");
 
-const oc = spawn("/home/harsh-amin/.opencode/bin/opencode", ["acp"], {
+const oc = spawn("/home/<user>/.opencode/bin/opencode", ["acp"], {
   stdio: ["pipe", "pipe", "inherit"],
 });
 let buf = "";

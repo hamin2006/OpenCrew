@@ -11,7 +11,7 @@ import pathlib
 import sys
 
 DISPATCH = pathlib.Path(
-    "/home/harsh-amin/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/telegram/transport_dispatch.py"
+    "/home/<user>/.kiro/crew-venv/lib/python3.12/site-packages/kiro_crew/telegram/transport_dispatch.py"
 )
 
 EDITS = [
@@ -37,7 +37,7 @@ EDITS = [
         "_MODEL_PICKER_LIMIT = 24\n"
         "\n"
         "# opencode binary for the /model catalog fallback (dashboard /api/models parity).\n"
-        '_OPENCODE_MODELS_BIN = "/home/harsh-amin/.opencode/bin/opencode"\n',
+        '_OPENCODE_MODELS_BIN = "/home/<user>/.opencode/bin/opencode"\n',
     ),
     # ── async signature ──
     (
