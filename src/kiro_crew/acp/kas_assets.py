@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import pathlib
 
 #: Override for the Node interpreter used to run KAS.
 ENV_KAS_NODE = "KIROCREW_KAS_NODE"
@@ -79,9 +80,34 @@ def _kiro_data_dirs() -> list[Path]:
     return candidates
 
 
+def _env_file_override(key: str) -> str:
+    """Value of *key* from the service env file when the process env lacks it.
+
+    The systemd unit reads ``/etc/kirocrew/kirocrew.env`` (Linux) or the
+    install-time env file on other platforms, so the service sees
+    ``KIROCREW_KAS_NODE``/``KIROCREW_KAS_SCRIPT`` while an interactive shell
+    does not. Diagnostics (``kirocrew doctor``) and one-shot tooling run
+    outside the service, so fall back to a read-only parse of that file.
+    """
+    if os.environ.get(key, "").strip():
+        return os.environ[key]
+    for candidate in (
+        pathlib.Path("/etc/kirocrew/kirocrew.env"),
+        pathlib.Path("~/.kiro/crew.env").expanduser(),
+    ):
+        try:
+            for line in candidate.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if line.startswith(key + "="):
+                    return line[len(key) + 1 :].strip()
+        except OSError:
+            continue
+    return ""
+
+
 def find_kas_node() -> Path | None:
     """The Node interpreter to run KAS with, or None when unresolvable."""
-    override = os.environ.get(ENV_KAS_NODE, "").strip()
+    override = _env_file_override(ENV_KAS_NODE)
     if override:
         return Path(override)
     for data_dir in _kiro_data_dirs():
@@ -98,7 +124,7 @@ def find_kas_server_script() -> Path | None:
     Bundles are extracted one directory per version; pick the most recently
     modified so a kiro-cli upgrade takes effect without any bookkeeping here.
     """
-    override = os.environ.get(ENV_KAS_SCRIPT, "").strip()
+    override = _env_file_override(ENV_KAS_SCRIPT)
     if override:
         return Path(override)
     for data_dir in _kiro_data_dirs():
