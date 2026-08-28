@@ -1206,16 +1206,27 @@ class TelegramDispatcher:
         self._prune_model_pickers(time.time())
 
     async def _handle_model(self, route: tuple[str, str], chat_id: int, arg: str) -> None:
-        """Post the model keyboard (or report the current pick for a bare arg).
+        """Post the model keyboard, or resolve a free-text model query.
 
-        Deliberately button-only: a free-text model id means guessing at names
-        the user has no way to enumerate, and a typo lands as a rejected
-        ``set_model`` mid-conversation. Any argument is treated as "show me the
-        list" rather than parsed.
+        A bare ``/model`` opens the provider/model pickers. ``/model <query>``
+        searches the opencode catalog (id or display name, case-insensitive):
+        an exact wire id is applied directly, one match is applied after
+        confirmation, several matches render as a tap-to-pick keyboard, and a
+        no-match reply points back to the browse list. This is how the 300+
+        OpenRouter models stay reachable from Telegram despite the 24-button
+        picker cap.
         """
         assert self.client is not None
         session_key = self._session_key(route)
         thread = self._route_thread(route)
+        if arg.strip():
+            provider = self.sessions.get_provider(session_key)
+            is_opencode = provider is None or str(
+                getattr(provider, "session_id", "") or ""
+            ).startswith("ses_")
+            if is_opencode:
+                await self._handle_model_query(route, chat_id, thread, arg.strip())
+                return
         if self._uses_opencode_catalog(session_key):
             await self._post_provider_picker(route, chat_id, thread, session_key)
             return
@@ -1258,6 +1269,76 @@ class TelegramDispatcher:
             message_id=message_id,
             created_at=now,
             choices=choices,
+        )
+
+    async def _handle_model_query(
+        self,
+        route: tuple[str, str],
+        chat_id: int,
+        thread: object,
+        query: str,
+    ) -> None:
+        """Resolve ``/model <query>`` against the opencode catalog.
+
+        Exact wire-id match applies directly; substring matches (id or display
+        name, case-insensitive) apply when unique or render as a tap-to-pick
+        keyboard when several. ``_apply_model`` records the preference and
+        switches the live session, so a match always lands.
+        """
+        rows = await self._fetch_opencode_model_rows()
+        if not rows:
+            await self._reply(
+                chat_id,
+                "Model catalog unavailable — send /model to browse.",
+                thread=thread,
+            )
+            return
+        ql = query.lower()
+        exact = [r for r in rows if r[0].lower() == ql]
+        if exact:
+            outcome = await self._apply_model(route, exact[0][0])
+            await self._reply(chat_id, outcome, thread=thread)
+            return
+        fuzzy = [
+            r for r in rows if ql in r[0].lower() or ql in r[1].lower()
+        ]
+        if not fuzzy:
+            await self._reply(
+                chat_id,
+                f"No model matches `{query}` — send /model to browse the list.",
+                thread=thread,
+            )
+            return
+        if len(fuzzy) == 1:
+            outcome = await self._apply_model(route, fuzzy[0][0])
+            await self._reply(chat_id, outcome, thread=thread)
+            return
+        shown = fuzzy[:_MODEL_PICKER_LIMIT]
+        current = self._model_pref.get(route, "")
+        header = f"`{query}` matched {len(fuzzy)} models"
+        if len(fuzzy) > _MODEL_PICKER_LIMIT:
+            header += f" — showing the first {_MODEL_PICKER_LIMIT}; narrow the query"
+        header += ":"
+        keyboard = [
+            [{"text": f"{'• ' if mid == current else ''}{label}", "callback_data": f"m:{index}"}]
+            for index, (mid, label) in enumerate(shown)
+        ]
+        message_id = await self._reply(
+            chat_id,
+            header,
+            thread=thread,
+            reply_markup={"inline_keyboard": keyboard},
+        )
+        if message_id is None:
+            return
+        now = time.time()
+        self._prune_model_pickers(now)
+        self._model_pickers[f"{chat_id}:{message_id}"] = _ModelPicker(
+            route=route,
+            chat_id=chat_id,
+            message_id=message_id,
+            created_at=now,
+            choices=shown,
         )
 
     async def _apply_model(self, route: tuple[str, str], model_id: str) -> str:
