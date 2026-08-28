@@ -19,6 +19,54 @@ set -euo pipefail
 REPO_URL="${REPO_URL:-https://github.com/hamin2006/OpenCrew.git}"
 WHEEL_VERSION="${WHEEL_VERSION:-0.3.0}"
 MODEL="${OPENCREW_MODEL:-deepseek/deepseek-v4-flash}"
+
+# Prefer the most recently used model from opencode's own session store
+# (SQLite in newer versions, per-project JSON in older ones) over the
+# hardcoded fallback — a fresh config then starts on the model the user
+# actually used last, not on deepseek.
+if [ -z "${OPENCREW_MODEL:-}" ]; then
+  _mru="$(
+    python3 - <<'PY'
+import json, glob, os, sqlite3, sys
+
+def db_mru(db_path):
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2)
+        row = con.execute(
+            "SELECT model FROM session WHERE model IS NOT NULL AND model != '' "
+            "ORDER BY time_updated DESC LIMIT 1"
+        ).fetchone()
+        con.close()
+        if row:
+            m = json.loads(row[0])
+            pid, mid = m.get("providerID"), m.get("id")
+            if pid and mid:
+                print(f"{pid}/{mid}")
+                return True
+    except Exception:
+        pass
+    return False
+
+base = os.path.expanduser("~/.local/share/opencode")
+for db in ("opencode.db", "opencode-local.db"):
+    if os.path.exists(os.path.join(base, db)) and db_mru(os.path.join(base, db)):
+        sys.exit(0)
+best, best_ts = None, 0
+for f in glob.glob(os.path.join(base, "project/*/storage/session/info/*.json")):
+    try:
+        st = os.path.getmtime(f)
+        d = json.load(open(f))
+        mid = d.get("modelID")
+        if mid and st > best_ts:
+            best, best_ts = mid, st
+    except Exception:
+        continue
+if best:
+    print(best)
+sys.exit(0)
+PY
+  )" && [ -n "$_mru" ] && MODEL="$_mru" && echo "  model: most recently used -> $_mru"
+fi
 CHECKOUT="${CHECKOUT:-$HOME/KiroCrew}"
 VENV="${VENV:-$HOME/.kiro/crew-venv}"
 KIRO_HOME="${KIRO_HOME:-$HOME/.kiro}"

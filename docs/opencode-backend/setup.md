@@ -44,10 +44,12 @@ All of this lives outside the package and survives any kirocrew update:
   ```
   (or `make build` from the repo root). Without it the gateway serves a
   broken dashboard — `kirocrew token` prints the "stale dashboard" warning.
-- **Default model** — the setup never assumes a provider: `OPENCREW_MODEL`
-  overrides the default (`deepseek/deepseek-v4-flash`) for freshly created
-  configs, and merging into an existing `opencode.json` keeps that config's
-  own `model` for the kirocrew agents.
+- **Default model** — the setup never assumes a provider: for a freshly
+  created `opencode.json` it uses the **most recently used model** from
+  opencode's session store (SQLite, falling back to the legacy per-project
+  JSON), then `OPENCREW_MODEL`, then a last-resort fallback. Merging into an
+  existing `opencode.json` keeps that config's own `model`; the kirocrew
+  agents carry no pins and inherit it.
 - **`.venv`** — the source-checkout wrapper (`~/.local/bin/kirocrew` →
   `~/KiroCrew/bin/kirocrew`) requires a bundled venv; symlink the real one:
   ```sh

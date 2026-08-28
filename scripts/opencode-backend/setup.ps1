@@ -129,6 +129,53 @@ $VenvPy = Join-Path $Checkout ".venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPy)) { Fail "venv creation failed — install Python 3.10+ (python.org) and re-run"; exit 1 }
 Ok "venv: $VenvPy"
 
+# Prefer the most recently used model from opencode's session store over the
+# hardcoded fallback — a fresh config starts on the model actually used last.
+if (-not $env:OPENCREW_MODEL) {
+    $ResolveMru = @'
+import json, glob, os, sqlite3, sys
+
+def db_mru(db_path):
+    try:
+        con = sqlite3.connect("file:" + db_path + "?mode=ro", uri=True, timeout=2)
+        row = con.execute(
+            "SELECT model FROM session WHERE model IS NOT NULL AND model != '' "
+            "ORDER BY time_updated DESC LIMIT 1"
+        ).fetchone()
+        con.close()
+        if row:
+            m = json.loads(row[0])
+            pid, mid = m.get("providerID"), m.get("id")
+            if pid and mid:
+                print(pid + "/" + mid)
+                return True
+    except Exception:
+        pass
+    return False
+
+base = os.path.expanduser("~/.local/share/opencode")
+for db in ("opencode.db", "opencode-local.db"):
+    if os.path.exists(os.path.join(base, db)) and db_mru(os.path.join(base, db)):
+        sys.exit(0)
+best, best_ts = None, 0
+for f in glob.glob(os.path.join(base, "project/*/storage/session/info/*.json")):
+    try:
+        st = os.path.getmtime(f)
+        d = json.load(open(f))
+        mid = d.get("modelID")
+        if mid and st > best_ts:
+            best, best_ts = mid, st
+    except Exception:
+        continue
+if best:
+    print(best)
+sys.exit(0)
+'@
+    $mru = ($ResolveMru | & $VenvPy -) 2>$null | Out-String
+    $mru = $mru.Trim()
+    if ($mru) { $DefaultModel = $mru; Ok "model: most recently used -> $mru" }
+}
+
 # ── 3. Editable install ───────────────────────────────────────────────────
 Say "Editable install"
 & $VenvPy -m pip install -e $Checkout --quiet
