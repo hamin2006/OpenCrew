@@ -189,6 +189,12 @@ def build_kas_argv(node: Path, server_script: Path) -> list[str]:
     ``--auth``), which needs a ``~/.aws/sso/cache`` token that the cli does not
     write.
     """
+    if str(server_script) == "/bin/true":
+        # OpenCrew: the node IS the server (the shim execs `opencode acp`), and
+        # /bin/true is the documented no-server-script sentinel. Spawn the node
+        # bare — KAS-only flags (--auth=acp-callback, transport, node flags)
+        # would be rejected by opencode or trigger the kiro-cli token callback.
+        return [str(node)]
     return [
         str(node),
         *KAS_NODE_FLAGS,
