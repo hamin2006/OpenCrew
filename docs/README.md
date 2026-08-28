@@ -1,5 +1,18 @@
 # Kiro Crew Documentation
 
+> **OpenCrew (this fork).** The `main` branch of this repository is the
+> opencode backend. Start here instead:
+>
+> - [OpenCrew setup guide](opencode-backend/README.md) — what this fork
+>   changes, prerequisites, and the one-shot `setup.sh` walkthrough
+> - [OpenCrew reference](opencode-backend/setup.md) — file-by-file change
+>   log, non-code setup, update workflow, and rollback
+> - [Setup script](../scripts/opencode-backend/setup.sh) — `git clone` +
+>   `bash scripts/opencode-backend/setup.sh` boots a gateway on opencode
+>
+> The docs below describe the stock Kiro Crew codebase; where they say
+> kiro-cli, the OpenCrew backend uses opencode instead.
+
 **This directory is the contributor and architecture documentation.** It is not
 shipped to users: the docs that ship inside the Python package live in
 [`../src/kiro_crew/docs/`](../src/kiro_crew/docs/README.md), and frontend-specific
