@@ -56,7 +56,7 @@ On top of that, this fork makes the pairing work end to end:
 
 | Requirement | Notes |
 |-------------|-------|
-| **Linux (Ubuntu 24.04 tested)** or macOS | tested on Ubuntu 24.04 x86_64 |
+| **Linux (Ubuntu 24.04 tested)**, macOS, or Windows (experimental) | full service on Linux/macOS; Windows is a manual-launch source install (see `setup.ps1`) |
 | **Python 3.12** | provided by the kirocrew installer (`~/.kiro/crew-venv`) |
 | **Node.js 22+** | required by opencode |
 | **opencode** | installed at `~/.opencode/bin/opencode` |

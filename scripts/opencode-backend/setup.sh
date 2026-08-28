@@ -320,6 +320,8 @@ if [ "$SKIP_SERVICE" != "1" ]; then
     fi
     "$VENV/bin/kirocrew" restart 2>/dev/null || "$VENV/bin/kirocrew" service install
     ok "gateway restarted (launchd)"
+    warn "macOS LaunchAgents start at LOGIN — on a headless Mac, enable auto-login"
+    warn "or install the agent as a root LaunchDaemon for boot-time persistence."
   else
     if [ ! -f /etc/systemd/system/kirocrew.service ]; then
       "$VENV/bin/kirocrew" service install

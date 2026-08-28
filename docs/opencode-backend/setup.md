@@ -94,6 +94,14 @@ All of this lives outside the package and survives any kirocrew update:
   history and models; watch `du -sh ~/.kiro/crew` and prune old snapshots
   (the `--keep` flag handles this).
 
+## Platform matrix
+
+| OS | Service | Boot persistence | Notes |
+|----|---------|------------------|-------|
+| **Linux** | systemd (`setup.sh` + `service install`) | full — `enabled` + linger | First-class target. `Restart=on-failure`, headless-safe. |
+| **macOS** | launchd (`setup.sh` + `service install`) | **login-gated** — LaunchAgents start at login | Works headless only with auto-login or a root LaunchDaemon; the gateway process env carries the KAS pins because `service_environment` propagates them at install time. |
+| **Windows** | none (`setup.ps1`, experimental) | manual, or a Task Scheduler ONLOGON task | In-checkout `.venv` per stock convention; `sandbox_allow_unsandboxed_exec` must be set (stock fail-closed would refuse to run). KAS node points straight at `opencode.exe` — no shim needed. |
+
 ## kiro-cli severance
 
 The opencode (kas) runtime has **zero kiro-cli dependency**: no boot probe, no
