@@ -43,6 +43,13 @@ from kiro_crew.discord.transport import DISCORD_CAPABILITIES
 from kiro_crew.executors import run_in_embed_pool
 from kiro_crew.hooks import TOOL_AUTO_APPROVE, TOOL_DENY
 from kiro_crew.messaging.attachments import IngestLimits
+from kiro_crew.messaging.model_pick import (
+    apply_model,
+    command_arg,
+    fetch_opencode_model_rows,
+    render_matches,
+    resolve_model_query,
+)
 from kiro_crew.messaging.attachments import cleanup as cleanup_attachments
 from kiro_crew.messaging.dispatch import delivery_is_muted
 from kiro_crew.messaging.driver import APPROVAL_INTERACTIVE, TurnDriver
@@ -200,6 +207,11 @@ class DiscordDispatcher:
             if interpret_as_command and override_mode is None
             else None
         )
+        if cmd == "model":
+            await self._handle_model_cmd(
+                user_id, channel_id, thread_id, parse_command_argument(text)
+            )
+            return
         if cmd == "new":
             left_resumed = self._session_resume.leave_resumed_session(channel_id)
             self._conv.bump_gen(scope_id)
@@ -1174,6 +1186,31 @@ class DiscordDispatcher:
                 "⚠️ Context is getting long. Use `!compact` to compress or "
                 "`!new` to start fresh.",
             )
+
+    async def _handle_model_cmd(
+        self, user_id: str, channel_id: str, thread_id: str, query: str
+    ) -> None:
+        """Free-text `/model <query>` — resolve and apply, stateless."""
+        session_key = self._inbound_session_key(user_id, channel_id, thread_id)
+        if not query:
+            msg = (
+                "Send `!model <name-or-id>` to switch models — e.g. `!model "
+                "claude` or a full id like `openrouter/~anthropic/"
+                "claude-fable-latest`."
+            )
+        else:
+            rows = await fetch_opencode_model_rows()
+            kind, payload = resolve_model_query(rows, query)
+            if kind == "apply":
+                msg = await apply_model(self.sessions, session_key, payload)
+            elif kind == "pick":
+                msg = render_matches(query, payload)
+            else:
+                msg = (
+                    f"No model matches `{query}` — send `!model` with a model "
+                    "id or a more specific name."
+                )
+        await self.client.send_message(channel_id, msg)
 
     async def _handle_compact(self, user_id: str, channel_id: str, thread_id: str = "") -> None:
         """In-place ACP ``/compact`` on the conversation's session."""

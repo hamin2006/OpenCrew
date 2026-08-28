@@ -29,6 +29,7 @@ from kiro_crew.messaging.conversation import ConversationState  # noqa: F401
 
 _NEW_ALIASES = frozenset(("!new", "!start", "/new", "/start"))
 _COMPACT_ALIASES = frozenset(("!compact", "/compact"))
+_MODEL_ALIASES = frozenset(("!model", "/model"))
 _HELP_ALIASES = frozenset(("!help", "/help"))
 _LINK_ALIASES = frozenset(("!link", "/link"))
 _UNLINK_ALIASES = frozenset(("!unlink", "/unlink"))
@@ -58,6 +59,8 @@ def parse_command(text: str) -> str | None:
         return "new"
     if cmd in _COMPACT_ALIASES:
         return "compact"
+    if cmd in _MODEL_ALIASES:
+        return "model"
     if cmd in _LINK_ALIASES:
         return "link"
     if cmd in _UNLINK_ALIASES:

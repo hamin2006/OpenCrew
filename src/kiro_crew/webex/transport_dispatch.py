@@ -28,6 +28,13 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from kiro_crew.messaging.dispatch import ChannelTurn, drive_turn, inbound_permitted
+from kiro_crew.messaging.model_pick import (
+    apply_model,
+    command_arg,
+    fetch_opencode_model_rows,
+    render_matches,
+    resolve_model_query,
+)
 from kiro_crew.messaging.driver import APPROVAL_INTERACTIVE
 from kiro_crew.messaging.link import build_dm_session_key, seed_generation
 from kiro_crew.webex.commands import HELP_TEXT, ConversationState, parse_command
@@ -94,6 +101,10 @@ class WebexDispatcher:
         logger.info("Webex inbound from %s: %d chars", email[:3] + "***" if email else "?", len(text or ""))
 
         # ── Command intercept (no LLM session needed) ──
+        model_arg = command_arg(text)
+        if model_arg is not None:
+            await self._handle_model_cmd(inbound, model_arg)
+            return
         cmd = parse_command(text)
         if cmd == "new":
             self._conv.bump_gen(email)
@@ -267,6 +278,29 @@ class WebexDispatcher:
                 "⚠️ This conversation's context is getting long — reply `/compact` "
                 "to compress it, or `/new` to start fresh.",
             )
+
+    async def _handle_model_cmd(self, inbound: "WebexInbound", query: str) -> None:
+        """Free-text `/model <query>` — resolve and apply, stateless."""
+        session_key = self._session_key(inbound.person_email)
+        if not query:
+            msg = (
+                "Send `/model <name-or-id>` to switch models — e.g. `/model "
+                "claude` or a full id like `openrouter/~anthropic/"
+                "claude-fable-latest`."
+            )
+        else:
+            rows = await fetch_opencode_model_rows()
+            kind, payload = resolve_model_query(rows, query)
+            if kind == "apply":
+                msg = await apply_model(self.sessions, session_key, payload)
+            elif kind == "pick":
+                msg = render_matches(query, payload)
+            else:
+                msg = (
+                    f"No model matches `{query}` — send `/model` with a model "
+                    "id or a more specific name."
+                )
+        await self.client.send_message(inbound.room_id, msg)
 
     async def _handle_compact(self, inbound: "WebexInbound") -> None:
         """In-place ACP ``/compact`` on the user's current session."""

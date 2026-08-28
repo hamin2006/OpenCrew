@@ -33,6 +33,13 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from kiro_crew.messaging.attachments import append_attachment_context
+from kiro_crew.messaging.model_pick import (
+    apply_model,
+    command_arg,
+    fetch_opencode_model_rows,
+    render_matches,
+    resolve_model_query,
+)
 from kiro_crew.messaging.attachments import cleanup as cleanup_attachments
 from kiro_crew.messaging.dispatch import ChannelTurn, drive_turn, inbound_permitted
 from kiro_crew.messaging.driver import APPROVAL_INTERACTIVE
@@ -113,6 +120,10 @@ class WeixinDispatcher:
         # to discard it would spend a CDN round trip for nothing. It is still
         # said out loud rather than dropped in silence, which is the failure mode
         # this channel's media support exists to remove.
+        model_arg = command_arg(text)
+        if model_arg is not None:
+            await self._handle_model_cmd(user_id, model_arg)
+            return
         cmd = parse_command(text)
         if cmd is not None:
             if inbound.attachments:
@@ -363,6 +374,25 @@ class WeixinDispatcher:
         elif pct >= soft and not self._conv.is_awaiting(user_id):
             self._conv.set_awaiting(user_id)
             await self._say(user_id, "⚠️ 对话上下文已较长，回复 /compact 压缩，或 /new 开始新对话。")
+
+    async def _handle_model_cmd(self, user_id: str, query: str) -> None:
+        """Free-text `/model <query>` — resolve and apply, stateless."""
+        session_key = self._session_key(user_id)
+        if not query:
+            msg = (
+                "发送 /model <名称或ID> 切换模型 — 如 /model claude，"
+                "或完整 ID 如 openrouter/~anthropic/claude-fable-latest"
+            )
+        else:
+            rows = await fetch_opencode_model_rows()
+            kind, payload = resolve_model_query(rows, query)
+            if kind == "apply":
+                msg = await apply_model(self.sessions, session_key, payload)
+            elif kind == "pick":
+                msg = render_matches(query, payload)
+            else:
+                msg = f"没有匹配 `{query}` 的模型 — 发送 /model 加模型 ID 或更精确的名称。"
+        await self._say(user_id, msg)
 
     async def _handle_compact(self, user_id: str) -> None:
         """In-place ACP ``/compact`` on the user's current session."""
