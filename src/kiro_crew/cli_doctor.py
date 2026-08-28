@@ -1008,6 +1008,10 @@ def _kas_version_label(script: "Path") -> str:
     for parent in script.parents:
         if parent.parent is not None and parent.parent.name == "kas":
             return parent.name
+    # The opencode (kas) backend runs a user shim (KIROCREW_KAS_SCRIPT), not
+    # an extracted kiro bundle — say so instead of reporting "unknown".
+    if "kiro-kas-shim" in str(script) or "kas-shim" in str(script):
+        return "shim (opencode)"
     return "unknown"
 
 
