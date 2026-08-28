@@ -115,6 +115,26 @@ control.
 continue the same work from the CLI and messaging surfaces like Telegram,
 Slack, and Discord.
 
+### Any LLM provider, with the Kiro Crew dashboard on top
+
+The agent is opencode, so **every provider opencode supports is your agent's
+brain** — DeepSeek, OpenAI, Anthropic, Gemini, Groq, local models, anything in
+`opencode models`. No vendor lock-in, no second account, and you can switch
+models from the dashboard header without touching configuration.
+
+What opencode alone does **not** give you, the Kiro Crew Gateway adds:
+
+| Beyond opencode | What OpenCrew gives you |
+|---|---|
+| **Web dashboard** | Parallel conversations, activity feed, approvals, memory, schedules, apps, and logs at `localhost:5476` — or over an SSH tunnel from anywhere |
+| **Messaging channels** | Continue the same sessions from Telegram, Slack, Discord, Teams, Webex, WeCom, or WeChat, with streaming replies and inline approvals |
+| **Scheduling & monitoring** | Cron jobs, heartbeats, and unattended reactive work that run on a timer — no model call needed |
+| **Persistent memory** | A semantic knowledge library, durable lessons from corrections, decaying history summaries, and an editable skills library |
+| **Task runner** | Checkpointed multi-step tasks (`kirocrew run TASK.md`) that plan, validate, retry, and resume |
+| **Managed subagents** | Spawn and inspect parallel subagents with full transcripts, kept for review |
+| **Approvals & audit** | Session-scoped trust, approvals answered from any surface, and an append-only security-event trail |
+| **Session tools** | Rewind, regenerate, edit-and-resend, history search, and per-session USD cost tracking |
+
 ## What OpenCrew does
 
 | Capability | What it gives you |

@@ -20,6 +20,30 @@ tracking, compaction, resume) are patched to speak opencode's dialect.
 
 ## What you get
 
+**Any LLM provider, Kiro Crew's dashboard.** The agent is opencode, so every
+provider opencode supports is available — DeepSeek, OpenAI, Anthropic, Gemini,
+Groq, local models, anything in `opencode models`. The Kiro Crew Gateway then
+adds everything opencode alone does not ship:
+
+- **Web dashboard** — parallel conversations, approvals, activity, memory,
+  schedules, apps, and logs at `localhost:5476`
+- **Messaging channels** — Telegram, Slack, Discord, Teams, Webex, WeCom, and
+  WeChat, continuing the same sessions with streaming replies and inline
+  approvals
+- **Scheduling & monitoring** — cron jobs and heartbeats that run unattended
+  on a timer, no model call required
+- **Persistent memory** — semantic knowledge library, durable lessons,
+  decaying history summaries, editable skills
+- **Task runner** — checkpointed multi-step tasks (`kirocrew run`) that
+  validate, retry, and resume
+- **Managed subagents** — parallel workers with full transcripts
+- **Approvals & audit** — session-scoped trust and an append-only security
+  event trail
+- **Session tools** — rewind, regenerate, edit-resend, history search, and
+  per-session USD cost tracking (Spent row)
+
+On top of that, this fork makes the pairing work end to end:
+
 - Dashboard + Telegram chat through opencode (`deepseek/deepseek-v4-flash`)
 - Working slash commands: `/tools /mcp /logdump /hooks /model /usage /context
   /clear /compact /agent /goal /prompts /todos /help /changelog`
