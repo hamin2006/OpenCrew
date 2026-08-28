@@ -2,183 +2,93 @@
   <img src="assets/banner.svg" alt="Kiro Crew. Keep work moving. Runs on your hardware, remembers across sessions, keeps working unattended.">
 </p>
 
-<h1 align="center">Kiro Crew</h1>
+<h1 align="center">OpenCrew</h1>
 
 <p align="center">
-  <strong>A persistent workspace for development work that self-improves and continues beyond one session.</strong>
+  <strong>A persistent AI workspace — the Kiro Crew dashboard and messaging channels running on an <a href="https://opencode.ai">opencode</a> backend.</strong>
 </p>
 
 <p align="center">
-  <a href="https://trendshift.io/repositories/103032" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/103032/daily?language=Python" alt="Kiro Crew on Trendshift" width="250" height="55"></a>
+  OpenCrew is a fork of <a href="https://github.com/kirodotdev/KiroCrew">Kiro Crew</a> whose agent backend is
+  <strong>opencode</strong> (headless, self-hosted) instead of kiro-cli. Every session, subagent, cron job,
+  heartbeat, and knowledge worker runs as an opencode session on the model stack of your choice —
+  built and tested on DeepSeek. No kiro account, no kiro-cli, no device-code sign-in.
 </p>
 
 <p align="center">
-  Kiro Crew is an open source development workspace that runs locally or remotely on
-  your hardware. It is persistent, self-learning, and self-evolving. Work with it
-  from the desktop app, web dashboard, and CLI, or continue the same work through
-  connection tools like Slack and Discord.
-  Your multi-step tasks can run unattended, recurring jobs run on your schedule,
-  and heartbeats monitor systems until something needs attention. Kiro Crew Apps
-  tailor that experience to a specific job, combining a purpose-built interface
-  with agents, skills, schedules, integrations, and backend services.
-</p>
-
-<p align="center">
-  <a href="https://github.com/kirodotdev/KiroCrew/releases"><img src="https://img.shields.io/badge/Download-macOS%20%7C%20Linux-2f6feb?style=flat-square" alt="Download Kiro Crew for macOS or Linux"></a>
+  <a href="docs/opencode-backend/README.md"><img src="https://img.shields.io/badge/OpenCrew%20setup-1f6feb?style=flat-square" alt="OpenCrew setup guide"></a>
   <a href="docs/README.md"><img src="https://img.shields.io/badge/Documentation-1f6feb?style=flat-square" alt="Read the documentation"></a>
-  <a href="docs/guides/install.md"><img src="https://img.shields.io/badge/Install%20guide-macOS%20%7C%20Linux%20%7C%20Windows-6e7781?style=flat-square" alt="Install guide for macOS, Linux, and Windows"></a>
-  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/Contributing-238636?style=flat-square" alt="Contributing guide"></a>
   <a href="SECURITY.md"><img src="https://img.shields.io/badge/Security-8250df?style=flat-square" alt="Security policy"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-656d76?style=flat-square" alt="Apache 2.0 license"></a>
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
-  <a href="#build-from-source">Build from source</a> ·
-  <a href="#why-kiro-crew">Why Kiro Crew</a> ·
-  <a href="#what-kiro-crew-does">Capabilities</a> ·
+  <a href="#why-opencrew">Why OpenCrew</a> ·
+  <a href="#what-opencrew-does">Capabilities</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#security-and-control">Security</a> ·
   <a href="#install-configure-and-operate">Install</a> ·
-  <a href="#anonymous-usage-telemetry">Telemetry</a> ·
-  <a href="#docs-and-contributing">Docs</a>
+  <a href="#updates">Updates</a> ·
+  <a href="#anonymous-usage-telemetry">Telemetry</a>
 </p>
 
 ## Quick start
 
-You choose how to run Kiro Crew: the desktop app with automatic updates, a
-one-line install on your machine or a remote host, the Docker image for
-always-on servers, or a build from source. Every path runs on `kiro-cli`
-underneath, so the first launch installs it if needed and guides Kiro
-device-code sign-in.
+OpenCrew runs the Kiro Crew Gateway on your own hardware and drives it with
+**opencode** — the agent binary you already use. The only prerequisites are
+opencode, Node.js 22+, and git.
 
-### App downloads
-
-The desktop app starts a bundled Gateway when no local Gateway is already
-running, updates itself on the channel you download, and can connect to a
-remote Gateway over an SSH tunnel. See the
-[desktop app guide](docs/build/desktop-app.md).
-
-- **macOS** (one universal DMG, Apple Silicon + Intel): [Stable](https://download.crew.kiro.dev/desktop/stable/latest/KiroCrew.dmg) | [Insider](https://download.crew.kiro.dev/desktop/insider/latest/KiroCrew.dmg) | [Nightly](https://download.crew.kiro.dev/desktop/nightly/latest/KiroCrew.dmg)
-- **Linux x86_64**: [Stable](https://download.crew.kiro.dev/desktop/stable/latest/KiroCrew-x86_64.AppImage) | [Insider](https://download.crew.kiro.dev/desktop/insider/latest/KiroCrew-x86_64.AppImage) | [Nightly](https://download.crew.kiro.dev/desktop/nightly/latest/KiroCrew-x86_64.AppImage)
-- **Linux aarch64** (Graviton, Raspberry Pi, ARM laptops): [Stable](https://download.crew.kiro.dev/desktop/stable/latest/KiroCrew-aarch64.AppImage) | [Insider](https://download.crew.kiro.dev/desktop/insider/latest/KiroCrew-aarch64.AppImage) | [Nightly](https://download.crew.kiro.dev/desktop/nightly/latest/KiroCrew-aarch64.AppImage)
-- **Windows**: no desktop build yet, so run the Gateway from a [source install](#build-from-source) and open the dashboard in your browser
-
-Not sure which Linux file you need? `uname -m` prints it — `x86_64` or `aarch64`.
-Every architecture below is a first-class lane: each gets its own build, its own
-auto-update feed, and its own SLSA provenance attestation.
-
-| Install path | x86_64 | aarch64 (ARM64) |
-|---|---|---|
-| **Desktop AppImage** | yes | yes |
-| **CLI one-liner / wheel** | yes | yes (the wheel is `py3-none-any`; native libraries are vendored per architecture) |
-| **Docker image** | yes | yes (`linux/amd64` and `linux/arm64` under every tag, so `docker pull` picks yours) |
-
-Take Stable unless you have a reason not to — the table below says who each
-channel is for.
-
-### Release channels
-
-Every install path — desktop app, CLI, Docker image — offers the same three
-channels. Pick by how much churn you can absorb, not by version number:
-
-| Channel | Who it's for | Built from | Cadence |
-|---------|--------------|------------|---------|
-| **Stable** | Everyone. The default on every install path. | The Insider build that baked long enough to be promoted | On promotion, no calendar commitment |
-| **Insider** | Power users who want features days to weeks early and accept the new bugs that come with them | Release-branch release-candidate tags | Every RC |
-| **Nightly** | Us and contributors. Untested `main` HEAD — expect breakage. | `main`, 06:00 UTC daily | Daily |
-
-Stable and Insider are two update lanes of the **same** app. The desktop app
-switches between them in Settings → About, a CLI install switches by re-running
-the installer with `--channel`, and a container switches by pulling a different
-tag. Either way, the other lane's current version then arrives as an ordinary
-update.
-
-Nightly is a separate app with its own name and icon, so it installs *alongside*
-a Stable or Insider one rather than replacing it. It is not a sandbox, though: it
-reads the same `~/.kiro/crew` data home unless you point it elsewhere with
-`KIROCREW_HOME`.
-
-Running Insider or Nightly is a real contribution. When something looks wrong,
-please [open an issue](https://github.com/kirodotdev/KiroCrew/issues) so it gets
-fixed before it reaches Stable.
-
-### One-line install
-
-Install the prebuilt, SHA-256-verified wheel from the release CDN without
-cloning the repository or running `npm` and a local build.
-
-Stable, the default:
+### 1. Install opencode (if you don't have it)
 
 ```bash
-curl -fsSL https://download.crew.kiro.dev/cli.sh | sh
+curl -fsSL https://opencode.ai/install | bash
+opencode auth login          # your model provider (e.g. DeepSeek)
+opencode models | head       # sanity-check the catalog
 ```
 
-Track a faster channel, `insider` or `nightly` (see
-[Release channels](#release-channels) for who each one is for):
+### 2. Run the OpenCrew setup
+
+The one-shot setup script clones OpenCrew, installs it into the gateway's
+venv (editable), builds or restores the dashboard frontend, wires the
+opencode shim, configures the `kirocrew*` agents and MCP servers, and starts
+the systemd service:
 
 ```bash
-curl -fsSL https://download.crew.kiro.dev/cli.sh | sh -s -- --channel insider
+git clone https://github.com/hamin2006/OpenCrew.git
+cd OpenCrew
+bash scripts/opencode-backend/setup.sh
 ```
 
-Pin an exact version:
+Prefer to see what it will do first? `bash scripts/opencode-backend/setup.sh --check`.
+Full detail in the [OpenCrew setup guide](docs/opencode-backend/README.md).
 
-```bash
-curl -fsSL https://download.crew.kiro.dev/cli.sh | sh -s -- --version 0.1.0
-```
+### 3. Start working
 
-Open `http://localhost:5476` and start a conversation. The web dashboard works
-without messaging credentials. Add a messaging channel —
+Open `http://localhost:5476` (the dashboard works without any messaging
+credentials) and start a conversation. Add a messaging channel —
 [Slack](docs/guides/slack-setup.md),
-[Discord](src/kiro_crew/docs/discord-integration.md),
 [Telegram](src/kiro_crew/docs/telegram-integration.md),
+[Discord](src/kiro_crew/docs/discord-integration.md),
 [Teams](src/kiro_crew/docs/teams-integration.md),
 [Webex](src/kiro_crew/docs/webex-integration.md),
 [WeCom](src/kiro_crew/docs/wecom-integration.md), or
 [WeChat](src/kiro_crew/docs/weixin-integration.md) — when you want to continue
-working with the same agent away from the dashboard. Apart from Teams (which
-needs a public HTTPS webhook — see its guide), these channels connect
+working with the same agent away from the dashboard. These channels connect
 outbound, so you do not need to expose the dashboard port publicly.
 
-### Docker
+### Desktop app and containers
 
-For always-on servers, the Gateway ships as a public multi-arch image on GHCR:
+OpenCrew is the self-hosted gateway: there is no desktop bundle and no
+published container image. Run it on a Linux or macOS host you control (a
+home server, VPS, or cloud VM) and reach the dashboard over the network or an
+SSH tunnel — see the [remote host guide](docs/guides/remote-and-mobile.md).
 
-```bash
-docker run -d --name kirocrew \
-  -p 127.0.0.1:5476:5476 \
-  -v kirocrew-home:/home/kirocrew \
-  ghcr.io/kirodotdev/kirocrew:stable
-```
+## Why OpenCrew
 
-See the [Docker guide](docs/guides/docker.md) for first-run login, channel tags, and
-the container security model.
-
-### Build from source
-
-macOS and Linux require Python 3.10+, Node.js 22+ (24 LTS recommended), npm, and
-[`kiro-cli`](https://kiro.dev/docs/cli/). The first desktop or dashboard launch
-can install Kiro CLI on the Gateway host and guide device-code sign-in before
-chat opens. Windows is supported through a native source install; follow the
-[Windows guide](docs/guides/windows-install.md) instead of the shell steps below.
-
-```bash
-# 1. Clone and build Kiro Crew
-git clone https://github.com/kirodotdev/KiroCrew.git
-cd KiroCrew
-make build
-source .venv/bin/activate
-
-# 2. Configure, verify, and start
-kirocrew setup
-kirocrew doctor
-kirocrew gateway
-```
-
-## Why Kiro Crew
-
-Most agent sessions end when the chat closes. Kiro Crew runs continuously on
-hardware you control and keeps working between conversations.
+Most agent sessions end when the chat closes. OpenCrew keeps working between
+conversations — on the model provider you already pay for, without a second
+vendor account.
 
 **Persistent.** Sessions, memory, schedules, and task checkpoints survive
 Gateway restarts, and scheduled or reactive work continues without someone at
@@ -188,35 +98,42 @@ the terminal.
 Preferences and project context carry into new sessions.
 
 **Self-evolving.** Repeated patterns become reusable skills. Memory, lessons,
-and skills stay visible and editable, so each Kiro Crew grows more tailored to
+and skills stay visible and editable, so each OpenCrew grows more tailored to
 the person and work around it.
 
-**Runs where you choose.** Your Mac, a local container, or a remote machine
-you control.
+**Runs on your model stack.** The agent backend is opencode: any provider
+opencode can reach (DeepSeek, OpenAI, local models, …) is your agent's brain.
+Model choice, effort, and auth all live in `~/.config/opencode/`.
 
-**One Gateway, many surfaces.** Work directly in the desktop app or web dashboard,
-or continue the same work from the CLI and messaging surfaces like Slack and
-Discord.
+**No kiro-cli.** Nothing probes, spawns, or requires kiro-cli. The dashboard
+shows your session cost in USD, not a vendor credit plan.
 
-## What Kiro Crew does
+**Runs where you choose.** Your Mac, a home server, or a remote machine you
+control.
+
+**One Gateway, many surfaces.** Work directly in the web dashboard, or
+continue the same work from the CLI and messaging surfaces like Telegram,
+Slack, and Discord.
+
+## What OpenCrew does
 
 | Capability | What it gives you |
 |---|---|
 | **Persistent sessions** | Run concurrent, isolated conversations, resume them after Gateway restarts, search prior sessions, and carry recent context into new work. |
 | **Self-learning** | Turn corrections and task failures into durable lessons that change later behavior. Keep preferences, active-project context, and history scoped to the relevant workspace. Say *"no, always run the frontend checks before calling a change done"* and it becomes a workspace-scoped lesson applied in future sessions. |
 | **Self-evolving skills** | Synthesize reusable skills from repeated patterns, then inspect, refine, or remove them as your work changes. |
-| **Long-running tasks** | Give Kiro Crew a task spec and walk away. It plans steps, executes them, validates results, retries failures, and resumes from checkpoints. *"Implement this migration plan and stop if the tests fail"* runs as a checkpointed task with validation at each step. |
+| **Long-running tasks** | Give OpenCrew a task spec and walk away. It plans steps, executes them, validates results, retries failures, and resumes from checkpoints. *"Implement this migration plan and stop if the tests fail"* runs as a checkpointed task with validation at each step. |
 | **Unattended autonomy** | Run scheduled agent work or deterministic scripts and commands without a model call. Monitor work until it is done, or react to messaging events and authenticated webhooks without someone at the terminal. *"Every weekday at 9, summarize the open work I should review"* becomes a timezone-aware recurring job delivered to the surface you choose. |
 | **Delegation** | Spawn isolated subagents for parallel work and bring their results back into the parent conversation. *"Research these three options in parallel and recommend one"* fans out to isolated subagents and synthesizes the tradeoffs. |
-| **Work where you choose** | Work directly in the desktop app or web dashboard, or continue through the CLI and any connected messaging surface without moving the agent runtime or its state. |
+| **Work where you choose** | Work directly in the web dashboard, or continue through the CLI and any connected messaging surface without moving the agent runtime or its state. |
 | **Installable Apps** | Add focused interfaces and domain workflows through dashboard pages, scoped Gateway APIs, events, and lifecycle hooks. |
 | **Extensible tools** | Add MCP servers, markdown skills, and hooks without changing the core runtime. |
 | **Visible execution** | Watch tool calls, subagent progress, context usage, approvals, schedules, memory, and logs from the dashboard. |
-| **Defense in depth** | Combine tool approvals, OS sandboxing, sensitive-path checks, credential redaction, deny rules, audit events, and governance profiles. |
+| **Defense in depth** | Combine tool approvals, sensitive-path checks, credential redaction, deny rules, audit events, and governance profiles. |
 
-You can also paste a screenshot and ask what is causing an error. Kiro Crew sends
-the image to the active Kiro model and keeps the diagnosis in the conversation
-history.
+You can also paste a screenshot and ask what is causing an error. OpenCrew
+sends the image to the active opencode model and keeps the diagnosis in the
+conversation history.
 
 The complete inventory is in [Features](src/kiro_crew/docs/index.md) and
 [What's New](CHANGELOG.md).
@@ -225,58 +142,59 @@ The complete inventory is in [Features](src/kiro_crew/docs/index.md) and
 
 ```mermaid
 flowchart TD
-    S["Desktop app · Web dashboard · CLI · Messaging channels (Slack, Discord, Telegram, Teams, Webex, WeCom, WeChat)"]
+    S["Web dashboard · CLI · Messaging channels (Telegram, Slack, Discord, Teams, Webex, WeCom, WeChat)"]
     G["Gateway<br/>access · sessions · memory · schedules · approvals · apps"]
-    A["Agent sessions<br/>ACP runtime · kiro-cli · MCP tools · models"]
+    A["Agent sessions<br/>opencode ACP runtime · MCP tools · models"]
     S --> G --> A
 ```
 
 The Gateway separates where the agent runs from where you work with it. In the
-desktop app or web dashboard, you can work directly through parallel conversations,
-files, task runs, approvals, memory, and apps. From the CLI or any connected
+web dashboard, you can work directly through parallel conversations, files,
+task runs, approvals, memory, and apps. From the CLI or any connected
 messaging channel, the Gateway routes your work to managed agent sessions under
-the same memory, tool, approval, and policy services. Apps extend the dashboard and
-Gateway APIs with focused workflows.
+the same memory, tool, approval, and policy services. Apps extend the dashboard
+and Gateway APIs with focused workflows.
 
 Each active conversation or background task uses an agent session. Its session
-provider drives `kiro-cli` over ACP, streams model and tool events, and preserves
+provider drives **opencode over the Agent Client Protocol** (via the
+`kiro-kas-shim.sh` node shim), streams model and tool events, and preserves
 conversation state. Depending on the workload, a session is backed by its own
-ACP process or by a session handle on a shared multiplexed ACP runtime. The
-Gateway manages these sessions along with scheduling, approvals, memory,
+opencode process or by a session handle on a shared multiplexed ACP runtime.
+The Gateway manages these sessions along with scheduling, approvals, memory,
 security policy, messaging connections, and the dashboard.
 
-The current runtime places the Gateway, agent sessions, ACP processes, and state
-on the same host. Run Kiro Crew on your Mac, inside a container on your machine,
-or on a remote Linux host you control. Conversation history, memory, and
-knowledge indexes remain on that host. Model requests are handled by `kiro-cli`
-and follow the account and model configuration you use there.
+The current runtime places the Gateway, agent sessions, ACP processes, and
+state on the same host. Run OpenCrew on your Mac, inside a container on your
+machine, or on a remote Linux host you control. Conversation history, memory,
+and knowledge indexes remain on that host. Model requests are handled by
+opencode and follow the provider and model configuration in
+`~/.config/opencode/` (auth via `opencode auth login`).
 
-**Gateway.** The Gateway is the long-running Kiro Crew process. It routes
-messages from the desktop app, web, CLI, and the messaging surfaces listed below. It persists
-session state, injects memory and skills, starts scheduled work, coordinates
-subagents, brokers approvals, enforces runtime policy, and exposes activity in
-the dashboard.
+**Gateway.** The Gateway is the long-running OpenCrew process. It routes
+messages from the dashboard, CLI, and the messaging surfaces listed below. It
+persists session state, injects memory and skills, starts scheduled work,
+coordinates subagents, brokers approvals, enforces runtime policy, and exposes
+activity in the dashboard.
 
-**Agent sessions.** A dashboard conversation, Slack thread, or Discord DM maps to
-an isolated agent session. Scheduled jobs, task runs, other messaging-channel
+**Agent sessions.** A dashboard conversation, Telegram DM, or Slack thread maps
+to an isolated agent session. Scheduled jobs, task runs, other messaging-channel
 conversations, and subagents also use managed sessions. These sessions preserve
 conversation context and can run concurrently before returning results to a
 parent session or configured surface.
 
-**ACP runtime and turns.** Kiro Crew supports both a dedicated `kiro-cli` ACP
-process for a session and a shared ACP runtime that multiplexes multiple session
-handles. During each turn, the session sends a prompt, streams model and tool
-events, resolves approvals, and returns the final result. An agent session is a
-logical isolation boundary, not necessarily one OS process.
+**ACP runtime and turns.** OpenCrew supports both a dedicated opencode ACP
+process for a session and a shared ACP runtime that multiplexes multiple
+session handles. During each turn, the session sends a prompt, streams model
+and tool events, resolves approvals, and returns the final result. An agent
+session is a logical isolation boundary, not necessarily one OS process.
 
 **Use the surface that fits the moment.**
 
 | Surface | Best for |
 |---|---|
-| **Desktop app** | The simplest local experience, with a bundled Gateway plus multi-tab connections to local or remote Gateways. |
 | **Web dashboard** | Parallel conversations, files, approvals, activity, memory, schedules, apps, settings, and system status at `localhost:5476`. |
-| **Slack** | Work from DMs and threads with streaming replies, approvals, notifications, and session links back to the dashboard. |
 | **Telegram** | Reach your agent from private DMs on your phone or laptop, with streaming replies, inline approvals, and commands. |
+| **Slack** | Work from DMs and threads with streaming replies, approvals, notifications, and session links back to the dashboard. |
 | **Discord** | Work from DMs with streaming replies and approvals delivered as message buttons. |
 | **Teams** | Reach your agent from Microsoft Teams chats — replies arrive as complete messages, and approvals are answered by typing. |
 | **Webex** | Work from Webex direct messages with streaming replies and inline approvals. |
@@ -294,7 +212,7 @@ logical isolation boundary, not necessarily one OS process.
 | **Task runner** | Bounded projects with explicit steps, tests, review, and checkpoint resume | `kirocrew run TASK.md` |
 | **Subagents** | Independent workstreams that can run concurrently | `kirocrew spawn run "task"` |
 
-**Memory, learning, and evolution.** Kiro Crew maintains preferences, active
+**Memory, learning, and evolution.** OpenCrew maintains preferences, active
 project context, decaying history summaries, and durable lessons. Corrections
 and task failures can change later behavior, while repeated patterns can become
 reusable skills. In-process embeddings add semantic retrieval for memory and
@@ -305,30 +223,34 @@ a conversation should not persist.
 **Skills, MCP, and apps.** Markdown skills supply reusable workflows and can be
 loaded only when relevant. The built-in `kirocrew-core`, `kirocrew-cron` and
 `kirocrew-computer` MCP servers expose task, subagent, learning, messaging,
-scheduling, and desktop-automation tools. You
-can discover additional MCP servers from Kiro or Kiro Crew configuration. The
-App Kit adds installable interfaces and domain workflows. Apps can add dashboard
-pages, use scoped Gateway APIs, subscribe to events, and register lifecycle
-hooks.
+scheduling, and desktop-automation tools. Add more MCP servers in
+`~/.config/opencode/opencode.json` — everything listed there becomes available
+to the agent. The App Kit adds installable interfaces and domain workflows.
+Apps can add dashboard pages, use scoped Gateway APIs, subscribe to events, and
+register lifecycle hooks.
+
+**Slash commands.** Because opencode short-circuits unknown slash commands
+before the model, the Gateway answers the useful ones itself:
+`/model /usage /context /clear /agent /compact /tools /mcp /logdump /hooks
+/goal /prompts /todos /help /changelog` — every command either works or says so.
 
 ## Security and control
 
-Kiro Crew gives an AI agent real tool access, so the controls are enforced at
+OpenCrew gives an AI agent real tool access, so the controls are enforced at
 the runtime boundary instead of relying only on prompt instructions.
 
 - **Local by default.** The dashboard binds to loopback unless you explicitly
   configure a network URL. Remote dashboards require token authentication.
 - **Interactive approvals.** Review tool requests in the dashboard or a
-  connected messaging channel like Slack, Discord, or Telegram.
+  connected messaging channel like Telegram, Slack, or Discord.
   Session-scoped trust can reduce repeated prompts without changing
   the underlying deny and sensitive-path controls.
-- **OS sandbox.** On Linux and macOS, `kiro-cli` can run inside namespace or
-  Seatbelt isolation. Standard, strict, and off modes make the tradeoff
-  explicit. Windows offers no equivalent OS-level layer, so Kiro Crew fails
-  closed there: agent subprocesses are refused rather than run unconfined, until
-  you declare the
-  [`sandbox_allow_unsandboxed_exec` opt-in](docs/guides/windows-install.md#the-unsandboxed-exec-opt-in).
-- **Sensitive data guards.** Kiro Crew blocks direct access to protected paths,
+- **OS sandbox.** On Linux and macOS the agent subprocess (opencode) can run
+  inside namespace or Seatbelt isolation. Standard, strict, and off modes make
+  the tradeoff explicit. OpenCrew ships with `sandbox: "off"` — with real
+  tool access, review the mode on your own host and read the
+  [security deep dive](docs/architecture/security-deep-dive.md).
+- **Sensitive data guards.** OpenCrew blocks direct access to protected paths,
   strips sensitive environment variables, and redacts credential patterns from
   output before it reaches a chat surface.
 - **Denied operations.** 137 bundled deny patterns block destructive commands and
@@ -347,56 +269,49 @@ chat. Read the [security architecture](docs/architecture/security-deep-dive.md) 
 
 ## Install, configure, and operate
 
-**Installer details.** The installer resolves the channel feed, verifies the wheel's SHA-256 against
-the published manifest, installs through `pipx` when available or a managed
-virtual environment at `~/.kiro/crew-venv` (beside the data home; override with
-`KIROCREW_VENV`), and records the channel in `~/.kiro/crew/channel`. The channels
-are `stable`, `insider`, and `nightly`, and `KIROCREW_CHANNEL` sets the default.
-On Linux it installs a Python 3.10+ interpreter from your distro when the system
-lacks one — via `apt` on Debian/Ubuntu, `dnf` on Amazon Linux / RHEL / CentOS
-Stream, `yum` on CentOS 7. Where no base-repo package supplies 3.10+ (CentOS 7,
-older Ubuntu) it uses an already-installed [mise](https://mise.jdx.dev/) if you
-have one, otherwise it prints how to install a newer Python and stops. The
-signed installer never pipes an unsigned third-party script into a shell.
+**Install OpenCrew.** The [setup script](scripts/opencode-backend/setup.sh)
+does the whole bootstrap on a machine with opencode installed:
 
-**Pin an exact wheel.** You can also install one exact wheel directly and pin it to its published
-SHA-256. Every version directory publishes a `SHA256SUMS` file next to the
-wheel, so take the hash for your wheel from there and put it in the URL
-fragment. `pip` verifies the hash and does not consult a package index for
-Kiro Crew itself:
+- clones this repository (or uses an existing `~/KiroCrew` checkout),
+- installs the checkout **editable** into the gateway venv (`~/.kiro/crew-venv`)
+  so code changes apply on `git pull`,
+- builds the dashboard frontend (`make frontend`) with an automatic fallback
+  to restoring `static/dist` from the stock 0.3.0 wheel,
+- writes the `kiro-kas-shim.sh` node shim (`exec opencode acp`),
+- configures `/etc/kirocrew/kirocrew.env` with
+  `KIROCREW_KAS_NODE`, `KIROCREW_KAS_SCRIPT`, and `KIROCREW_PROJECT_DIR`,
+- merges the `kirocrew*` agents and `kirocrew-core`/`kirocrew-cron` MCP
+  servers into `~/.config/opencode/opencode.json`,
+- symlinks `~/.config/opencode/skills` → `~/.kiro/crew/skills`,
+- sets `agent.acp_backend: "kas"` in the gateway config, and
+- installs + starts the `kirocrew` systemd service.
 
-```bash
-pip install "https://download.crew.kiro.dev/cli/stable/<version>/kirocrew-<version>-py3-none-any.whl#sha256=<sha256>"
-```
+Run it again any time — it is idempotent. `--check` reports state without
+changing anything.
 
-**Semantic memory.** Semantic memory needs no setup. Embeddings run in-process, and the Gateway
-downloads its embedding model in the background on first start, verifies it,
-and stores it under `~/.kiro/crew/models`. Until the model lands, memory search
-falls back to keyword search and picks up embeddings automatically without a
-restart. Set `KIROCREW_EMBED_MODEL_URL` to point at a mirror for airgapped
-installs.
+**Semantic memory.** Semantic memory needs no setup. Embeddings run in-process,
+and the Gateway downloads its embedding model in the background on first start,
+verifies it, and stores it under `~/.kiro/crew/models`. Until the model lands,
+memory search falls back to keyword search and picks up embeddings
+automatically without a restart. Set `KIROCREW_EMBED_MODEL_URL` to point at a
+mirror for airgapped installs.
 
-See [Installing and Building](docs/guides/install.md) for wheels, desktop builds,
-Windows, optional voice dependencies, and manual setup.
+See [Installing and Building](docs/guides/install.md) for the source build,
+the frontend build, and manual setup; the
+[OpenCrew setup guide](docs/opencode-backend/README.md) is the authoritative
+reference for the opencode backend.
 
-**Choose where Kiro Crew runs.** The current deployment model keeps the Gateway,
+**Choose where OpenCrew runs.** The current deployment model keeps the Gateway,
 agent session runtime, ACP processes, and state together on one host. Your Apps
 and chat surfaces connect to that Gateway.
 
-| Deployment | How to run it | Where Kiro Crew and its state live |
+| Deployment | How to run it | Where OpenCrew and its state live |
 |---|---|---|
-| **Mac app, local** | Install or build the desktop app with `make desktop` | The app starts its bundled Gateway. Agent sessions, ACP processes, and `~/.kiro/crew` stay on your Mac. |
-| **Native local** | `make build`, or install a wheel from `make wheel` | The Gateway and agent runtime run directly on your macOS, Linux, or Windows machine. |
-| **Local container** | Run `ghcr.io/kirodotdev/kirocrew` and persist `/home/kirocrew` | The Gateway and agent runtime run inside the official multi-arch container on your machine. |
-| **Remote hardware** | Follow the [remote host guide](docs/guides/remote-and-mobile.md) and install the service | The Gateway, agent sessions, and state run continuously on your Linux server, home lab, or cloud instance. Connect the desktop app or browser through an SSH tunnel. |
-| **Windows source install** | Follow [the Windows guide](docs/guides/windows-install.md) | The Gateway, agent sessions, chat, cron, and dashboard run natively with documented feature limits. |
+| **Native local (Linux / macOS)** | `bash scripts/opencode-backend/setup.sh` | The Gateway and agent runtime run directly on your machine. |
+| **Remote hardware** | Follow the [remote host guide](docs/guides/remote-and-mobile.md) and install the service | The Gateway, agent sessions, and state run continuously on your Linux server, home lab, or cloud instance. Connect the dashboard or browser through an SSH tunnel. |
 
-For containers, mount the directory selected by `KIROCREW_HOME` so sessions,
-configuration, memory, and credentials survive replacement. Keep the Gateway
-port bound to loopback unless you intentionally configure authenticated remote
-access. Container isolation and the Kiro Crew OS sandbox are separate layers
-and depend on the host runtime configuration. See the
-[Docker guide](docs/guides/docker.md) for the published image and deployment details.
+Keep the Gateway port bound to loopback unless you intentionally configure
+authenticated remote access.
 
 **Keep it running.** Install a systemd service on Linux or a launchd agent on
 macOS:
@@ -416,15 +331,7 @@ KIROCREW_PORT=5477 kirocrew service install
 ```
 
 To change it later without reinstalling, edit `/etc/kirocrew/kirocrew.env`
-(created by `service install`) and run `sudo systemctl restart kirocrew`. Units
-installed by releases before v0.2.0 lack the `EnvironmentFile=` directive that
-reads this file — re-run `kirocrew service install` or use a systemd drop-in;
-see [the install guide](docs/guides/install.md#setting-the-service-port).
-
-The desktop app can use this local Gateway or connect to a remote one. For an
-always-on VPS, home server, or cloud VM in your account, follow the
-[remote host guide](docs/guides/remote-and-mobile.md). Kiro Crew does not require a
-Kiro Crew-hosted control plane.
+(created by `service install`) and run `sudo systemctl restart kirocrew`.
 
 **Configure it.** User data lives under `~/.kiro/crew` by default. Manage the
 main configuration with `kirocrew config get`, `set`, and `edit`.
@@ -433,29 +340,34 @@ main configuration with `kirocrew config get`, `set`, and `edit`.
 {
   "agent": {
     "provider": "acp",
+    "acp_backend": "kas",
     "approval_mode": "interactive",
-    "sandbox": "auto"
+    "sandbox": "off"
   },
   "session": {
     "timeout_secs": 1800,
     "pool_size": 2
   },
   "dashboard": {
-    "bot_name": "Kiro Crew"
+    "bot_name": "OpenCrew"
   }
 }
 ```
 
-`agent.provider` is fixed to `acp`. Kiro Crew drives `kiro-cli` over the Agent
-Client Protocol. Set the dashboard port with `KIROCREW_PORT` or
-`kirocrew gateway --port <n>`. Messaging-channel credentials (Slack, Discord,
-Telegram, and the rest) live in `~/.kiro/crew/.env` rather than the JSON config.
+`agent.provider` is fixed to `acp` and `agent.acp_backend` selects the agent:
+`kas` (opencode — this fork) or `kiro` (stock kiro-cli). OpenCrew's model and
+provider configuration lives in `~/.config/opencode/opencode.json` and its
+auth in opencode's own credential store. Set the dashboard port with
+`KIROCREW_PORT` or `kirocrew gateway --port <n>`. Messaging-channel
+credentials (Telegram, Slack, Discord, and the rest) live in
+`~/.kiro/crew/.env` rather than the JSON config.
 
 **Troubleshoot quickly.** Start with `kirocrew doctor`. For an ACP timeout,
-confirm `kiro-cli` is on `PATH` and logged in, then allow extra time for the
-first MCP startup. For memory search, check that the embedding
-model finished downloading under `~/.kiro/crew/models`. For a stale MCP configuration, run
-`kirocrew setup --agent-only`, or add `--clean` to rebuild it.
+confirm `opencode` is on `PATH` and authenticated (`opencode auth login`),
+then allow extra time for the first MCP startup. For memory search, check
+that the embedding model finished downloading under `~/.kiro/crew/models`.
+For a stale MCP configuration, run `kirocrew setup --agent-only`, or add
+`--clean` to rebuild it.
 
 **Find the logs.** When you need to debug, the fastest path is
 `kirocrew logs` (tail the most recent gateway output) or `kirocrew logs -f` to
@@ -479,13 +391,31 @@ also read the raw files directly:
 See the [Troubleshooting guide](src/kiro_crew/docs/troubleshooting.md) for the
 full log-level reference and emergency recovery steps.
 
+## Updates
+
+OpenCrew is a git install: `KIROCREW_PROJECT_DIR` points at the checkout, so
+the Gateway treats itself as a git deployment and the official wheel can never
+overwrite your setup.
+
+```bash
+cd ~/KiroCrew
+git fetch upstream && git merge upstream/main   # sync Kiro Crew upstream fixes
+git push origin main                            # (if you forked)
+sudo systemctl restart kirocrew
+```
+
+**Never** run the official Kiro Crew installer
+(`curl -fsSL https://download.crew.kiro.dev/cli.sh | sh`) on an OpenCrew
+machine — it replaces the venv with the stock kiro-cli build.
+
 ## Anonymous usage telemetry
 
-Kiro Crew sends **one anonymous heartbeat per day** so maintainers can see how
-many copies are actively running, which versions are in use, and which
-platforms and install channels to support. After a successful install or update
-from the official app catalog, it also sends one anonymous per-app receipt.
-Both signals are on by default and use the same controls below.
+OpenCrew sends **one anonymous heartbeat per day** so the upstream Kiro Crew
+maintainers can see how many copies are actively running, which versions are
+in use, and which platforms and install channels to support. After a
+successful install or update from the official app catalog, it also sends one
+anonymous per-app receipt. Both signals are on by default and use the same
+controls below.
 
 To turn it off, flip **Settings → Privacy → Send anonymous usage heartbeat** in
 the dashboard (the same switch appears on the last step of first-run
@@ -508,23 +438,8 @@ both — when it is set, the dashboard toggle is disabled and says so.
 | Random instance id | `9c75560d…` (UUID4) | Lets us count how many copies ran on a given day. Generated once on first run and derived from nothing — not your hostname, username, MAC, IP, or any account. It identifies an installed copy, never a person. |
 | App version | `0.1.2` | Which releases are still in use. **Release number only** — build stamps like `-nightly.20260731t065756` are stripped before sending, because a per-build timestamp is near-unique and would help identify a specific machine. |
 | Python minor version | `3.12` | When the minimum can move up |
-| Install channel | `dmg` | Which install path people actually use |
+| Install channel | `git` | Which install path people actually use |
 | First-run flag | `1` / `0` | New installs vs returning |
-
-**Official-app install receipts are separate and event-based.** After a
-successful official-catalog install or update, Kiro Crew sends one GET to
-`/b/1/install/<app-slug>?t=<token>&k=<fresh|update>&v=<release>` on the same
-telemetry host. The slug is the public catalog identifier. `t` is the first 32
-hex characters of HMAC-SHA256 keyed by the local beacon install id over
-`app-install:<slug>`; the raw install id is never sent, and tokens for different
-apps cannot be linked to assemble an installed-app profile. `k` separates fresh
-installs from updates, and `v` is the same release-only Kiro Crew version clamp
-used by the heartbeat.
-
-Receipts are emitted only for bundled or edition-provided official catalog
-entries. Apps from user-configured registries, local-directory installs, and
-self-registered apps emit nothing, so private app names never leave the machine.
-If no persistent beacon install id exists yet, the receipt is skipped.
 
 This list used to be nine fields. Release channel, OS, CPU architecture and
 governance posture were **removed** — each was coarse on its own, but the
@@ -532,11 +447,10 @@ instance id is stable, so those attributes all describe the *same* copy and
 together they narrowed the group any one install blends into far more than any
 single field suggests.
 
-We report this as **Daily Active Crews** rather than "users": Kiro Crew has
-no account system of its own, and the Kiro sign-in that `kiro-cli` uses for
-model access is never read or sent. There is no way to resolve a copy to a
-person, so one person running Kiro Crew on three machines counts as three
-Crews.
+We report this as **Daily Active Crews** rather than "users": OpenCrew has no
+account system of its own, and the model provider's sign-in that opencode uses
+is never read or sent. There is no way to resolve a copy to a person, so one
+person running OpenCrew on three machines counts as three Crews.
 
 **Never sent:** your prompts, model responses, file contents, file paths, repo
 or branch names, credentials, environment variables, hostname, username, or IP
@@ -566,10 +480,11 @@ performance metrics that never leave your machine. See
 
 | Topic | Start here |
 |---|---|
-| Install and packaging | [Install and build](docs/guides/install.md), [Windows](docs/guides/windows-install.md), [Docker](docs/guides/docker.md), [Desktop](docs/build/desktop-app.md), [Remote host](docs/guides/remote-and-mobile.md), [Release process](docs/build/release.md) |
+| OpenCrew (this fork) | [Setup guide](docs/opencode-backend/README.md), [change log + rollback](docs/opencode-backend/setup.md), [setup script](scripts/opencode-backend/setup.sh) |
+| Install and packaging | [Install and build](docs/guides/install.md), [Remote host](docs/guides/remote-and-mobile.md), [Release process](docs/build/release.md) |
 | Product capabilities | [Features](src/kiro_crew/docs/index.md), [Skills](skills/README.md), [All user docs](src/kiro_crew/docs/README.md) |
 | All documentation | [docs/](docs/README.md) for contributor and architecture docs |
-| Channels | [Slack](docs/guides/slack-setup.md), [Discord](src/kiro_crew/docs/discord-integration.md), [Telegram](src/kiro_crew/docs/telegram-integration.md), [Teams](src/kiro_crew/docs/teams-integration.md), [Webex](src/kiro_crew/docs/webex-integration.md), [WeCom](src/kiro_crew/docs/wecom-integration.md), [WeChat (Weixin)](src/kiro_crew/docs/weixin-integration.md) |
+| Channels | [Telegram](src/kiro_crew/docs/telegram-integration.md), [Slack](docs/guides/slack-setup.md), [Discord](src/kiro_crew/docs/discord-integration.md), [Teams](src/kiro_crew/docs/teams-integration.md), [Webex](src/kiro_crew/docs/webex-integration.md), [WeCom](src/kiro_crew/docs/wecom-integration.md), [WeChat (Weixin)](src/kiro_crew/docs/weixin-integration.md) |
 | Architecture | [System architecture](docs/architecture/overview.md), [Memory](docs/system-specs/modules/memory-skills-hooks.md), [MCP](docs/architecture/mcp.md), [App Kit](docs/app-kit/getting-started.md) |
 | Trust and dependencies | [Security](docs/architecture/security-deep-dive.md), [Security policy](SECURITY.md) |
 | Project work | [Contributing](CONTRIBUTING.md), [Tenets](TENETS.md), [Governance](GOVERNANCE.md), [Maintainers](MAINTAINERS.md), [AI assistant rules](AGENTS.md), [Changelog](CHANGELOG.md) |
@@ -589,9 +504,25 @@ npm run check
 npm run build
 ```
 
-Use [GitHub Issues](https://github.com/kirodotdev/KiroCrew/issues) for bugs and
-feature requests. Do not file security vulnerabilities publicly.
+Use [GitHub Issues](https://github.com/hamin2006/OpenCrew/issues) for OpenCrew
+bugs and feature requests. Bugs in upstream Kiro Crew belong in
+[kirodotdev/KiroCrew issues](https://github.com/kirodotdev/KiroCrew/issues).
+Do not file security vulnerabilities publicly.
 
+## Upstream
+
+OpenCrew is a fork of [Kiro Crew](https://github.com/kirodotdev/KiroCrew)
+(© kirodotdev, Apache-2.0). The opencode backend work lives on this branch;
+everything else is upstream's. The contributor wall below is upstream's —
+their work is this project's foundation, and it stays credited.
+
+## Contributors
+
+Kiro Crew was made possible by its internal community, the people who supported the
+project and shipped its code, together with everyone who has since opened a pull
+request in the open. This is that founding group; as Kiro Crew grows in the open, we
+look forward to many more contributors joining them. Thank you to everyone who helped
+make this tool possible:
 
 ## Contributors
 
