@@ -1153,12 +1153,26 @@ def resolve_opencode_wire_id(config_options: object, model_id: str) -> str:
 
     Exact candidate match wins; a bare-name (name-part) match is the fallback
     so raw models.dev names (``"DeepSeek V4 Flash"``) still resolve.
+
+    Both matches are CASE-INSENSITIVE, and the name-part fallback also strips
+    the label's ``(Provider)`` suffix before comparing. MEASURED mismatch that
+    motivated this: the catalog builds ``"GLM-5.3-Flash (openrouter)"`` from
+    the provider *id* while opencode names the option with the provider
+    *display* (``"OpenRouter/GLM-5.3-Flash"``) — the candidate's lowercase id
+    never byte-equals the option's capitalized display, and the old fallback
+    compared the FULL label against the option's bare name-part, so both arms
+    missed and the raw label went to the wire (opencode: ``model not found``).
     """
     if not model_id or model_id == "auto" or "/" in model_id:
         return model_id
     _label = model_id.strip()
     m = re.match(r"^(?P<name>.*) \((?P<provider>[^()]*)\)$", _label)
     candidate = f"{m.group('provider')}/{m.group('name')}" if m else ""
+    # The label's bare model name — "GLM-5.3-Flash" out of
+    # "GLM-5.3-Flash (openrouter)", or the whole label when it carries no
+    # "(Provider)" suffix — matched against the option name's segment after
+    # the provider display ("OpenRouter/GLM-5.3-Flash").
+    _name_part = m.group("name").strip() if m else _label
     if not isinstance(config_options, (list, tuple)):
         return model_id
     for opt in config_options:
@@ -1170,13 +1184,28 @@ def resolve_opencode_wire_id(config_options: object, model_id: str) -> str:
                 isinstance(o, dict)
                 and o.get("value")
                 and candidate
-                and str(o.get("name") or "") == candidate
+                and str(o.get("name") or "").strip().lower() == candidate.lower()
             ):
                 return str(o["value"])
         for o in _options:
             if not isinstance(o, dict) or not o.get("value"):
                 continue
-            if str(o.get("name") or "").split("/", 1)[-1] == _label:
-                return str(o["value"])
+            _opt_name = str(o.get("name") or "").strip()
+            if (
+                _name_part
+                and _opt_name.split("/", 1)[-1].strip().lower() == _name_part.lower()
+            ):
+                # Disambiguate only when unique: two providers may ship the
+                # same bare name (e.g. an id on opencode-go AND openrouter).
+                dupes = [
+                    x
+                    for x in _options
+                    if isinstance(x, dict)
+                    and x.get("value")
+                    and str(x.get("name") or "").strip().split("/", 1)[-1].strip().lower()
+                    == _name_part.lower()
+                ]
+                if len(dupes) == 1:
+                    return str(dupes[0]["value"])
         break
     return model_id
